@@ -155,8 +155,9 @@ app.use('/api', (_req, res) => {
 const distDir = path.resolve(__dirname, '..', 'dist')
 app.use(express.static(distDir, { index: false, maxAge: '1h' }))
 
-// SPA fallback — Express 5 requires a named wildcard.
-app.get('/*splat', (_req, res) => {
+// SPA fallback — Express 5 requires a named wildcard, and "{*splat}" (not "/*splat")
+// is what also matches the root path "/".
+app.get('/{*splat}', (_req, res) => {
   res.sendFile(path.join(distDir, 'index.html'), (err) => {
     if (err) res.status(200).type('html').send('<!doctype html><h1>Swad MH13</h1><p>Run "npm run build" to generate the client bundle.</p>')
   })
