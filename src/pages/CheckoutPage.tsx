@@ -193,8 +193,8 @@ export default function CheckoutPage() {
         </section>
 
         <p className="text-center text-[10px] leading-relaxed text-ink-500">
-          By placing this order you agree to Swad MH13’s fair-use policy. Your details are stored in
-          your own Supabase project only.
+          By placing this order you agree to Swad MH13’s fair-use policy. Your details are used only
+          to deliver this order.
         </p>
       </div>
 
