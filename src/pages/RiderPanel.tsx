@@ -136,9 +136,7 @@ export default function RiderPanel() {
   const doneOrders = orders.filter((order) => !isActive(order.status))
   const visible = tab === 'active' ? activeOrders : tab === 'available' ? available : doneOrders
 
-  const earnings = doneOrders
-    .filter((order) => order.status === 'delivered')
-    .reduce((sum, order) => sum + 25, 0)
+  const earnings = doneOrders.filter((order) => order.status === 'delivered').length * 25
 
   if (loading) return <Spinner label="Loading rider console" />
 
