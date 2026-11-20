@@ -212,6 +212,21 @@ function degradeForMissingTable(table, error, fallback) {
   return fallback
 }
 
+/**
+ * Demo rows for a table that has not been created yet.
+ * Used both by the boot probe path and by request-time degradation, so a panel
+ * shows real demo content instead of an empty list (and stats() stays truthful).
+ */
+function demoRows(table) {
+  const camel = table.replace(/_([a-z])/g, (_, c) => c.toUpperCase())
+  const rows = memory[table] ?? memory[camel]
+  if (!Array.isArray(rows)) return []
+  const copy = [...rows]
+  if (table === 'riders') copy.sort((a, b) => a.name.localeCompare(b.name))
+  if (table === 'customers') copy.sort((a, b) => (a.created_at < b.created_at ? 1 : -1))
+  return copy
+}
+
 /** Probe each required table once at boot so /api/config can report what is missing. */
 export async function detectMissingTables() {
   status.missingTables = []
@@ -350,7 +365,7 @@ export async function listMenu(restaurantId) {
       .eq('restaurant_id', restaurantId)
       .order('name')
     if (error) {
-      if (isMissingTableError(error)) rows = degradeForMissingTable('menu_items', error, [])
+      if (isMissingTableError(error)) rows = degradeForMissingTable('menu_items', error, demoRows('menu_items'))
       else throw new Error(error.message)
     } else {
       rows = data
@@ -455,7 +470,7 @@ export async function listOrders({ customer_id, restaurant_id, rider_id, status:
     if (orderStatus) q = q.eq('status', orderStatus)
     const { data, error } = await q
     if (error) {
-      if (isMissingTableError(error)) rows = degradeForMissingTable('orders', error, [])
+      if (isMissingTableError(error)) rows = degradeForMissingTable('orders', error, demoRows('orders'))
       else throw new Error(error.message)
     } else {
       rows = data
@@ -626,7 +641,7 @@ export async function listRiders() {
   if (useSupabase('riders')) {
     const { data, error } = await sb.from('riders').select('*').order('name')
     if (error) {
-      if (isMissingTableError(error)) return degradeForMissingTable('riders', error, [])
+      if (isMissingTableError(error)) return degradeForMissingTable('riders', error, demoRows('riders'))
       throw new Error(error.message)
     }
     return data
@@ -702,7 +717,7 @@ export async function listCustomers() {
   if (useSupabase('customers')) {
     const { data, error } = await sb.from('customers').select('*').order('created_at', { ascending: false })
     if (error) {
-      if (isMissingTableError(error)) return degradeForMissingTable('customers', error, [])
+      if (isMissingTableError(error)) return degradeForMissingTable('customers', error, demoRows('customers'))
       throw new Error(error.message)
     }
     return data
