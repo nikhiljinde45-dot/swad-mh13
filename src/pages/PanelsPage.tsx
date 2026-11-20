@@ -64,7 +64,11 @@ export default function PanelsPage() {
             React + TypeScript + Tailwind
           </span>
           <span className="rounded-full bg-white/15 px-2.5 py-1 text-[10px] font-semibold ring-1 ring-white/20">
-            {config?.mode === 'supabase' ? 'Supabase connected' : 'Demo data'}
+            {config?.mode === 'supabase'
+              ? 'Supabase connected'
+              : config?.supabase_url
+                ? 'Supabase URL set'
+                : 'Demo data'}
           </span>
         </div>
       </div>
@@ -96,6 +100,22 @@ export default function PanelsPage() {
           <p className="mt-1 flex items-center gap-1.5 text-xs font-semibold text-emerald-700">
             <Icon.Check className="h-4 w-4" /> Connected — reads and writes go to your database.
           </p>
+        ) : config?.supabase_url ? (
+          <div className="mt-1 space-y-1.5">
+            <p className="flex flex-wrap items-center gap-1.5 text-xs font-semibold text-ink-900">
+              <Icon.Check className="h-4 w-4 shrink-0 text-emerald-600" />
+              Project linked:{' '}
+              <span className="font-mono text-[11px]">
+                {config.supabase_url.replace(/^https?:\/\//, '')}
+              </span>
+            </p>
+            <p className="text-xs leading-relaxed text-ink-700">
+              Waiting for the API key. Add{' '}
+              <code className="rounded bg-ink-900/5 px-1">SUPABASE_ANON_KEY</code> in Settings →
+              Environment variables (Supabase → Project Settings → API → <code className="rounded bg-ink-900/5 px-1">anon</code>{' '}
+              public) to switch from demo data to your database.
+            </p>
+          </div>
         ) : (
           <p className="mt-1 text-xs leading-relaxed text-ink-700">
             Running on the built-in demo catalogue. Add <code className="rounded bg-ink-900/5 px-1">SUPABASE_URL</code>{' '}

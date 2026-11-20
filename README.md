@@ -46,7 +46,8 @@ The project is already wired for Supabase; only two server-side values are neede
 
    | Variable | Where to find it | Notes |
    | --- | --- | --- |
-   | `SUPABASE_URL` | Supabase → Project Settings → API → Project URL | e.g. `https://abcd1234.supabase.co` |
+   | `SUPABASE_URL` | Supabase → Project Settings → API → Project URL | e.g. `https://abcd1234.supabase.co`; a bare project ref such as `vppfluhgfkbamwngadcd` is also accepted and expanded to `https://<ref>.supabase.co` |
+   | `SUPABASE_PROJECT_REF` | The `<ref>` part of `supabase.com/dashboard/project/<ref>` | Optional; used only when `SUPABASE_URL` is empty |
    | `SUPABASE_ANON_KEY` | Supabase → Project Settings → API → `anon` public key | Required |
    | `SUPABASE_SERVICE_ROLE_KEY` | Same page, `service_role` secret | Optional; preferred on the server |
 
