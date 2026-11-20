@@ -323,8 +323,12 @@ export async function listMenu(restaurantId) {
       .select('*')
       .eq('restaurant_id', restaurantId)
       .order('name')
-    if (error) throw new Error(error.message)
-    rows = data
+    if (error) {
+      if (isMissingTableError(error)) rows = degradeForMissingTable('menu_items', error, [])
+      else throw new Error(error.message)
+    } else {
+      rows = data
+    }
   } else {
     rows = memory.menu_items
       .filter((m) => m.restaurant_id === restaurantId)
