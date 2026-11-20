@@ -12,6 +12,7 @@ import {
   startSession,
   loadProfile,
 } from './supabase.js'
+import { availableColumns, pick, ORDER_COLUMNS, RESTAURANT_COLUMNS, MENU_COLUMNS, PROFILE_COLUMNS } from './schema.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const PORT = Number(process.env.PORT || 3000)
@@ -87,15 +88,15 @@ const shapeUser = (user, profile) => ({
 
 /* ------------------------------ meta ------------------------------ */
 
-const REQUIRED_COLUMNS = [
-  ['profiles', 'id, full_name, phone, email, role, is_blocked'],
-  ['restaurants', 'id, owner_user_id, name, description, image_url, address, city, pincode, owner_name, owner_phone, is_active, rejection_reason, delivery_fee'],
-  ['categories', 'id, name, image_url'],
-  ['menu_items', 'id, restaurant_id, category_id, name, description, price, image_url, is_available, is_veg'],
-  ['addresses', 'id, user_id, full_address, city, pincode'],
-  ['orders', 'id, user_id, restaurant_id, address_id, total_amount, subtotal, delivery_fee, order_status, payment_status, payment_method, delivery_address, notes, rider_id, created_at'],
-  ['order_items', 'id, order_id, menu_item_id, item_name, quantity, unit_price'],
-]
+const SCHEMA_EXPECTATIONS = {
+  profiles: ['id', 'full_name', 'phone', 'email', 'role', 'is_blocked'],
+  restaurants: ['id', 'owner_user_id', 'name', 'description', 'image_url', 'address', 'city', 'pincode', 'owner_name', 'owner_phone', 'is_active', 'rejection_reason', 'delivery_fee'],
+  categories: ['id', 'name', 'image_url'],
+  menu_items: ['id', 'restaurant_id', 'category_id', 'name', 'description', 'price', 'image_url', 'is_available', 'is_veg'],
+  addresses: ['id', 'user_id', 'full_address', 'city', 'pincode'],
+  orders: ['id', 'user_id', 'restaurant_id', 'address_id', 'total_amount', 'subtotal', 'delivery_fee', 'order_status', 'payment_status', 'payment_method', 'delivery_address', 'notes', 'rider_id', 'created_at'],
+  order_items: ['id', 'order_id', 'menu_item_id', 'item_name', 'quantity', 'unit_price'],
+}
 
 let setupCache = { at: 0, value: null }
 
@@ -105,9 +106,10 @@ async function setupReport() {
   if (!configured) {
     missing.push('SUPABASE_URL / SUPABASE_SECRET_KEY environment variables')
   } else {
-    for (const [table, columns] of REQUIRED_COLUMNS) {
-      const { error } = await sb.from(table).select(columns).limit(1)
-      if (error) missing.push(`${table}: ${error.message}`)
+    for (const [table, wanted] of Object.entries(SCHEMA_EXPECTATIONS)) {
+      const present = await availableColumns(table, wanted)
+      const absent = wanted.filter((column) => !present.includes(column))
+      if (absent.length) missing.push(`${table}: ${absent.join(', ')}`)
     }
   }
   const value = { ready: missing.length === 0, missing }
@@ -146,7 +148,7 @@ app.get('/api/restaurants', wrap(async (req, res) => {
 
   let query = sb
     .from('restaurants')
-    .select('id, name, description, image_url, address, city, pincode, is_active, delivery_fee, created_at')
+    .select('*')
     .eq('is_active', true)
     .order('name')
 
@@ -187,7 +189,7 @@ app.get('/api/restaurants/:id', wrap(async (req, res) => {
   if (!configured) fail(503, 'Supabase is not configured on the server')
   const { data: restaurant, error } = await sb
     .from('restaurants')
-    .select('id, name, description, image_url, address, city, pincode, is_active, delivery_fee')
+    .select('*')
     .eq('id', req.params.id)
     .maybeSingle()
   if (error) fail(500, error.message)
@@ -195,7 +197,7 @@ app.get('/api/restaurants/:id', wrap(async (req, res) => {
 
   const { data: menu, error: menuError } = await sb
     .from('menu_items')
-    .select('id, restaurant_id, category_id, name, description, price, image_url, is_available, is_veg, categories (name)')
+    .select('*, categories (name)')
     .eq('restaurant_id', restaurant.id)
     .order('name')
   if (menuError) fail(500, menuError.message)
@@ -235,8 +237,9 @@ app.post('/api/auth/register', wrap(async (req, res) => {
   }
 
   const userId = created.user.id
+  const profileCols = await availableColumns('profiles', PROFILE_COLUMNS)
   const { error: profileError } = await sb.from('profiles').upsert(
-    { id: userId, full_name: fullName, phone, email, role },
+    pick({ id: userId, full_name: fullName, phone, email, role }, profileCols),
     { onConflict: 'id' },
   )
   if (profileError) fail(500, `Could not create profile: ${profileError.message}`)
@@ -368,9 +371,7 @@ async function orderRows(orders) {
 }
 
 const ORDER_SELECT =
-  'id, user_id, restaurant_id, address_id, total_amount, subtotal, delivery_fee, order_status, ' +
-  'payment_status, payment_method, delivery_address, notes, rider_id, created_at, updated_at, ' +
-  'restaurants (id, name, image_url, address), order_items (*)'
+  '*, restaurants (id, name, image_url, address), order_items (*)'
 
 app.get('/api/orders', requireAuth(), wrap(async (req, res) => {
   const { user, profile } = req.auth
@@ -490,21 +491,24 @@ app.post('/api/orders', requireAuth('customer', 'admin'), wrap(async (req, res) 
     deliveryAddress = `${fullAddress}, ${city} ${pincode}`
   }
 
+  const orderCols = await availableColumns('orders', ORDER_COLUMNS)
+  const orderPayload = pick({
+    user_id: req.auth.user.id,
+    restaurant_id: restaurant.id,
+    address_id: addressId,
+    total_amount: total,
+    subtotal,
+    delivery_fee: deliveryFee,
+    order_status: 'placed',
+    payment_status: 'pending',
+    payment_method: paymentMethod,
+    delivery_address: deliveryAddress,
+    notes: notes || null,
+  }, orderCols)
+
   const { data: order, error: orderError } = await sb
     .from('orders')
-    .insert({
-      user_id: req.auth.user.id,
-      restaurant_id: restaurant.id,
-      address_id: addressId,
-      total_amount: total,
-      subtotal,
-      delivery_fee: deliveryFee,
-      order_status: 'placed',
-      payment_status: 'pending',
-      payment_method: paymentMethod,
-      delivery_address: deliveryAddress,
-      notes: notes || null,
-    })
+    .insert(orderPayload)
     .select()
     .single()
   if (orderError) fail(500, `Could not place order: ${orderError.message}`)
@@ -537,7 +541,7 @@ app.get('/api/owner/restaurant', requireAuth('owner', 'admin'), wrap(async (req,
 
   const [{ data: menu }, { data: categories }] = await Promise.all([
     sb.from('menu_items')
-      .select('id, restaurant_id, category_id, name, description, price, image_url, is_available, is_veg, categories (name)')
+      .select('*, categories (name)')
       .eq('restaurant_id', restaurant.id)
       .order('name'),
     sb.from('categories').select('id, name').order('name'),
@@ -564,7 +568,12 @@ app.post('/api/owner/restaurant', requireAuth('owner', 'admin'), wrap(async (req
     is_active: false,
   }
 
-  const { data, error } = await sb.from('restaurants').insert(payload).select().single()
+  const restaurantCols = await availableColumns('restaurants', RESTAURANT_COLUMNS)
+  const { data, error } = await sb
+    .from('restaurants')
+    .insert(pick(payload, restaurantCols))
+    .select()
+    .single()
   if (error) fail(500, error.message)
   res.status(201).json({ restaurant: data })
 }))
@@ -584,11 +593,12 @@ app.patch('/api/owner/restaurant', requireAuth('owner', 'admin'), wrap(async (re
   if (body.delivery_fee !== undefined) patch.delivery_fee = Math.max(0, number(body.delivery_fee, 25))
   // is_active is intentionally not editable here — only an admin approves.
   if (!Object.keys(patch).length) fail(400, 'Nothing to update')
+  const restaurantCols = await availableColumns('restaurants', RESTAURANT_COLUMNS)
   patch.updated_at = new Date().toISOString()
 
   const { data, error } = await sb
     .from('restaurants')
-    .update(patch)
+    .update(pick(patch, restaurantCols))
     .eq('id', restaurant.id)
     .eq('owner_user_id', req.auth.user.id)
     .select()
@@ -602,7 +612,7 @@ app.get('/api/owner/menu', requireAuth('owner', 'admin'), wrap(async (req, res) 
   if (!restaurant) return res.json({ menu: [] })
   const { data, error } = await sb
     .from('menu_items')
-    .select('id, restaurant_id, category_id, name, description, price, image_url, is_available, is_veg, categories (name)')
+    .select('*, categories (name)')
     .eq('restaurant_id', restaurant.id)
     .order('name')
   if (error) fail(500, error.message)
@@ -628,9 +638,10 @@ app.post('/api/owner/menu-items', requireAuth('owner', 'admin'), wrap(async (req
   const restaurant = await ownedRestaurant(req.auth.user.id)
   if (!restaurant) fail(400, 'Register your restaurant before adding dishes')
 
+  const menuCols = await availableColumns('menu_items', MENU_COLUMNS)
   const { data, error } = await sb
     .from('menu_items')
-    .insert({ ...menuPayload(req.body || {}), restaurant_id: restaurant.id })
+    .insert(pick({ ...menuPayload(req.body || {}), restaurant_id: restaurant.id }, menuCols))
     .select('id, restaurant_id, category_id, name, description, price, image_url, is_available, is_veg')
     .single()
   if (error) fail(500, error.message)
@@ -666,10 +677,11 @@ app.patch('/api/owner/menu-items/:id', requireAuth('owner', 'admin'), wrap(async
   if (body.is_available !== undefined) patch.is_available = Boolean(body.is_available)
   if (body.is_veg !== undefined) patch.is_veg = Boolean(body.is_veg)
   if (!Object.keys(patch).length) fail(400, 'Nothing to update')
+  const menuCols = await availableColumns('menu_items', MENU_COLUMNS)
 
   const { data, error } = await sb
     .from('menu_items')
-    .update(patch)
+    .update(pick(patch, menuCols))
     .eq('id', item.id)
     .select('id, restaurant_id, category_id, name, description, price, image_url, is_available, is_veg')
     .single()
@@ -713,9 +725,10 @@ app.patch('/api/owner/orders/:id/status', requireAuth('owner', 'admin'), wrap(as
     fail(400, `Cannot move an order from ${order.order_status} to ${status}`)
   }
 
+  const orderCols = await availableColumns('orders', ORDER_COLUMNS)
   const { data, error } = await sb
     .from('orders')
-    .update({ order_status: status, updated_at: new Date().toISOString() })
+    .update(pick({ order_status: status, updated_at: new Date().toISOString() }, orderCols))
     .eq('id', order.id)
     .select(ORDER_SELECT)
     .single()
@@ -749,10 +762,11 @@ app.patch('/api/rider/orders/:id/status', requireAuth('rider', 'admin'), wrap(as
 
   const patch = { order_status: status, updated_at: new Date().toISOString() }
   if (status === 'delivered') patch.payment_status = 'paid'
+  const orderCols = await availableColumns('orders', ORDER_COLUMNS)
 
   const { data, error } = await sb
     .from('orders')
-    .update(patch)
+    .update(pick(patch, orderCols))
     .eq('id', order.id)
     .select(ORDER_SELECT)
     .single()
@@ -765,7 +779,7 @@ app.patch('/api/rider/orders/:id/status', requireAuth('rider', 'admin'), wrap(as
 app.get('/api/admin/overview', requireAuth('admin'), wrap(async (_req, res) => {
   const [restaurants, profiles, orders, categories] = await Promise.all([
     sb.from('restaurants').select('*').order('created_at', { ascending: false }),
-    sb.from('profiles').select('id, full_name, phone, email, role, is_blocked, created_at').order('created_at', { ascending: false }),
+    sb.from('profiles').select('*').order('created_at', { ascending: false }),
     sb.from('orders').select(ORDER_SELECT).order('created_at', { ascending: false }).limit(100),
     sb.from('categories').select('id, name').order('name'),
   ])
@@ -806,7 +820,13 @@ app.patch('/api/admin/restaurants/:id', requireAuth('admin'), wrap(async (req, r
   if (body.rejection_reason !== undefined) patch.rejection_reason = clean(body.rejection_reason) || null
   if (!('is_active' in patch) && !('rejection_reason' in patch)) fail(400, 'Nothing to update')
 
-  const { data, error } = await sb.from('restaurants').update(patch).eq('id', req.params.id).select().single()
+  const restaurantCols = await availableColumns('restaurants', RESTAURANT_COLUMNS)
+  const { data, error } = await sb
+    .from('restaurants')
+    .update(pick(patch, restaurantCols))
+    .eq('id', req.params.id)
+    .select()
+    .single()
   if (error) fail(500, error.message)
   res.json({ restaurant: data })
 }))
@@ -828,11 +848,12 @@ app.patch('/api/admin/profiles/:id', requireAuth('admin'), wrap(async (req, res)
   }
   if (!Object.keys(patch).length) fail(400, 'Nothing to update')
 
+  const profileCols = await availableColumns('profiles', PROFILE_COLUMNS)
   const { data, error } = await sb
     .from('profiles')
-    .update(patch)
+    .update(pick(patch, profileCols))
     .eq('id', req.params.id)
-    .select('id, full_name, phone, email, role, is_blocked')
+    .select('*')
     .single()
   if (error) fail(500, error.message)
   res.json({ profile: data })
@@ -849,9 +870,10 @@ app.patch('/api/admin/orders/:id/assign', requireAuth('admin'), wrap(async (req,
     .maybeSingle()
   if (!rider || rider.role !== 'rider') fail(400, 'That account is not a rider')
 
+  const orderCols = await availableColumns('orders', ORDER_COLUMNS)
   const { data, error } = await sb
     .from('orders')
-    .update({ rider_id: riderId, updated_at: new Date().toISOString() })
+    .update(pick({ rider_id: riderId, updated_at: new Date().toISOString() }, orderCols))
     .eq('id', req.params.id)
     .select(ORDER_SELECT)
     .single()
