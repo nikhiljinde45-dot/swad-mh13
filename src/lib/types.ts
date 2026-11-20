@@ -108,6 +108,7 @@ export interface AdminOverview {
   admins: Profile[]
   categories: Category[]
   orders: Order[]
+  riderAssignmentReady?: boolean
   counts: {
     restaurants: number
     active_restaurants: number

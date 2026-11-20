@@ -881,6 +881,7 @@ app.get('/api/admin/overview', requireAuth('admin'), wrap(async (_req, res) => {
 
   const orderList = await orderRows(orders.data ?? [])
   const people = profiles.data ?? []
+  const orderCols = await availableColumns('orders', ORDER_COLUMNS)
 
   res.json({
     restaurants: restaurants.data ?? [],
@@ -891,6 +892,8 @@ app.get('/api/admin/overview', requireAuth('admin'), wrap(async (_req, res) => {
     admins: people.filter((person) => person.role === 'admin'),
     categories: categories.data ?? [],
     orders: orderList,
+    // false while the database still lacks orders.rider_id (migration pending)
+    riderAssignmentReady: orderCols.includes('rider_id'),
     counts: {
       restaurants: (restaurants.data ?? []).length,
       active_restaurants: (restaurants.data ?? []).filter((restaurant) => restaurant.is_active).length,
