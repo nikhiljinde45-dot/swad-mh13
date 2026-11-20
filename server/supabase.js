@@ -84,13 +84,14 @@ export function jwtExpiry(token) {
 }
 
 export async function loadProfile(userId) {
-  const { data, error } = await sb
-    .from('profiles')
-    .select('id, full_name, phone, email, role, is_blocked')
-    .eq('id', userId)
-    .maybeSingle()
+  const { data, error } = await sb.from('profiles').select('*').eq('id', userId).maybeSingle()
   if (error) throw error
-  return data
+  if (!data) return null
+  return {
+    ...data,
+    role: data.role || 'customer',
+    is_blocked: Boolean(data.is_blocked),
+  }
 }
 
 /** Resolve the cookie into a user + profile, refreshing the token if needed. */
