@@ -180,7 +180,8 @@ export const api = {
   },
 
   rider: {
-    orders: () => request<{ orders: Order[] }>('/api/rider/orders'),
+    orders: () =>
+      request<{ orders: Order[]; riderAssignmentReady?: boolean }>('/api/rider/orders'),
     setStatus: (id: string, status: OrderStatus) =>
       request<{ order: Order }>(`/api/rider/orders/${id}/status`, {
         method: 'PATCH',

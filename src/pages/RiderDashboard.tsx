@@ -12,6 +12,8 @@ export default function RiderDashboard() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [busyId, setBusyId] = useState<string | null>(null)
+  // false when the database still lacks orders.rider_id (migration not run yet)
+  const [riderReady, setRiderReady] = useState(true)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -19,6 +21,7 @@ export default function RiderDashboard() {
     try {
       const result = await api.rider.orders()
       setOrders(result.orders)
+      setRiderReady(result.riderAssignmentReady !== false)
     } catch (cause) {
       setError(cause instanceof ApiError ? cause.message : 'Could not load your deliveries.')
     } finally {
@@ -83,6 +86,14 @@ export default function RiderDashboard() {
           </Alert>
         )}
 
+        {riderReady === false && (
+          <Alert tone="warning">
+            Rider assignment is not switched on in the database yet, so no deliveries can reach
+            you. An administrator needs to run the SQL in
+            supabase/migrations/20261120000000_swad_mh13_auth.sql once.
+          </Alert>
+        )}
+
         <div className="grid grid-cols-3 gap-2">
           <Stat label="Ready" value={ready.length} />
           <Stat label="On the way" value={active.length} />
@@ -103,7 +114,11 @@ export default function RiderDashboard() {
         {orders.length === 0 ? (
           <EmptyState
             title="No deliveries assigned"
-            message="An administrator assigns orders to you once they are ready for pickup."
+            message={
+              riderReady === false
+                ? 'Rider assignment is waiting for the database migration. Nothing is lost — your account is ready.'
+                : 'An administrator assigns orders to you once they are ready for pickup.'
+            }
           />
         ) : (
           <div className="space-y-2">
