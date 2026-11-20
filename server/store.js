@@ -75,6 +75,7 @@ export const status = {
     process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY
   ),
   keyKind: KEY_KIND,
+  missingTables: [],
   mode: 'demo',
   warning: null,
 }
@@ -152,7 +153,14 @@ export async function init() {
     if ((probe.data || []).length === 0 && process.env.AUTO_SEED_SUPABASE !== 'false') {
       await seedSupabase()
     }
-    console.log('[swad-mh13] connected to Supabase')
+    await detectMissingTables()
+    console.log(
+      `[swad-mh13] connected to Supabase${
+        status.missingTables.length
+          ? ` — missing tables: ${status.missingTables.join(', ')}`
+          : ''
+      }`
+    )
   } catch (err) {
     status.mode = 'demo'
     status.warning = `Supabase connection failed (${err.message}). Running on demo data. Check SUPABASE_URL / SUPABASE_ANON_KEY and that supabase/schema.sql has been applied.`
@@ -165,14 +173,59 @@ export async function init() {
 /** Insert the demo catalogue into an empty Supabase project so the app is usable immediately. */
 async function seedSupabase() {
   console.log('[swad-mh13] seeding empty Supabase project with demo catalogue')
-  await sb.from('restaurants').insert(seedRestaurants)
-  await sb.from('menu_items').insert(seedMenuItems)
-  await sb.from('riders').insert(seedRiders)
-  await sb.from('customers').insert(seedCustomers)
-  await sb.from('orders').insert(seedOrders)
+  const catalogue = {
+    restaurants: seedRestaurants,
+    menu_items: seedMenuItems,
+    riders: seedRiders,
+    customers: seedCustomers,
+    orders: seedOrders,
+  }
+  // Per-table so one missing table cannot abort the whole seed (or the boot).
+  for (const [table, rows] of Object.entries(catalogue)) {
+    const { error } = await sb.from(table).insert(rows)
+    if (error) console.warn(`[swad-mh13] seed "${table}" skipped: ${error.message}`)
+  }
 }
 
 const useSupabase = () => status.mode === 'supabase'
+
+/** Every table the app reads. supabase/schema.sql creates all of them. */
+const REQUIRED_TABLES = ['restaurants', 'menu_items', 'riders', 'customers', 'orders']
+
+const MISSING_TABLE_RE = /could not find the table|does not exist|schema cache|undefined table/i
+
+function isMissingTableError(error) {
+  return Boolean(error) && MISSING_TABLE_RE.test(error.message || '')
+}
+
+/**
+ * Record a table as missing and return the fallback value.
+ * A project that has not run schema.sql yet should still render the app (with an
+ * explicit notice) instead of returning HTTP 500 from every panel.
+ */
+function degradeForMissingTable(table, error, fallback) {
+  if (!status.missingTables.includes(table)) status.missingTables.push(table)
+  console.warn(`[swad-mh13] table "${table}" missing — run supabase/schema.sql (${error.message})`)
+  return fallback
+}
+
+/** Probe each required table once at boot so /api/config can report what is missing. */
+async function detectMissingTables() {
+  status.missingTables = []
+  if (!useSupabase()) return status.missingTables
+
+  for (const table of REQUIRED_TABLES) {
+    const { error } = await sb.from(table).select('*', { count: 'exact', head: true })
+    if (!error) continue
+    if (isMissingTableError(error)) status.missingTables.push(table)
+    else console.warn(`[swad-mh13] probe "${table}" failed: ${error.message}`)
+  }
+
+  if (status.missingTables.length) {
+    status.warning = `Connected to Supabase, but these tables do not exist yet: ${status.missingTables.join(', ')}. Run supabase/schema.sql in the Supabase SQL editor to create them.`
+  }
+  return status.missingTables
+}
 
 /* ------------------------------------------------------------------ */
 /* Helpers                                                             */
@@ -371,8 +424,12 @@ export async function listOrders({ customer_id, restaurant_id, rider_id, status:
     if (rider_id) q = q.eq('rider_id', rider_id)
     if (orderStatus) q = q.eq('status', orderStatus)
     const { data, error } = await q
-    if (error) throw new Error(error.message)
-    rows = data
+    if (error) {
+      if (isMissingTableError(error)) rows = degradeForMissingTable('orders', error, [])
+      else throw new Error(error.message)
+    } else {
+      rows = data
+    }
   } else {
     rows = memory.orders
       .filter((o) => !customer_id || o.customer_id === customer_id)
@@ -538,7 +595,10 @@ export async function updateOrder(id, patch) {
 export async function listRiders() {
   if (useSupabase()) {
     const { data, error } = await sb.from('riders').select('*').order('name')
-    if (error) throw new Error(error.message)
+    if (error) {
+      if (isMissingTableError(error)) return degradeForMissingTable('riders', error, [])
+      throw new Error(error.message)
+    }
     return data
   }
   return [...memory.riders].sort((a, b) => a.name.localeCompare(b.name))
@@ -611,7 +671,10 @@ export async function deleteRider(id) {
 export async function listCustomers() {
   if (useSupabase()) {
     const { data, error } = await sb.from('customers').select('*').order('created_at', { ascending: false })
-    if (error) throw new Error(error.message)
+    if (error) {
+      if (isMissingTableError(error)) return degradeForMissingTable('customers', error, [])
+      throw new Error(error.message)
+    }
     return data
   }
   return [...memory.customers].sort((a, b) => (a.created_at < b.created_at ? 1 : -1))

@@ -111,6 +111,7 @@ export interface AppConfig {
   supabase_configured: boolean
   supabase_key_missing?: boolean
   supabase_key_kind?: 'secret' | 'publishable' | 'none'
+  missing_tables?: string[]
   warning: string | null
   statuses: OrderStatus[]
   flow: OrderStatus[]

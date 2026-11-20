@@ -26,6 +26,7 @@ app.get('/api/config', (_req, res) => {
     supabase_configured: db.status.supabaseConfigured,
     supabase_key_missing: db.status.missingKey,
     supabase_key_kind: db.status.keyKind,
+    missing_tables: db.status.missingTables,
     warning: db.status.warning,
     statuses: db.ORDER_STATUSES,
     flow: db.ORDER_FLOW,
