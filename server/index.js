@@ -192,7 +192,9 @@ function upiPaymentString(order, settings) {
     cu: 'INR',
     tn: orderReference(order),
   })
-  return `upi://pay?${params.toString()}`
+  // UPI apps expect the VPA unencoded inside pa; a percent-encoded %40 fails to
+  // resolve on some of them, so keep the address readable in the QR payload.
+  return `upi://pay?${params.toString().replace(/%40/g, '@')}`
 }
 
 app.get('/api/payments/config', wrap(async (_req, res) => {

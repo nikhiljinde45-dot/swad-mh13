@@ -474,13 +474,15 @@ async function main() {
 
       const onlineTotal = Number(onlineOrder.json?.order?.total_amount ?? 0).toFixed(2)
       const qr = await customer.call(`/api/orders/${onlineId}/payment-qr`)
-      const decodedQr = decodeURIComponent(qr.json?.upi_string ?? '')
+      const rawQr = qr.json?.upi_string ?? ''
+      const decodedQr = decodeURIComponent(rawQr)
       check(
         'payment QR carries the exact order amount and the UPI ID',
         qr.status === 200 &&
           Number(qr.json?.amount) === Number(onlineTotal) &&
-          decodedQr.startsWith('upi://pay?') &&
-          decodedQr.includes('pa=swadtest@okaxis') &&
+          rawQr.startsWith('upi://pay?') &&
+          rawQr.includes('pa=swadtest@okaxis') &&
+          !rawQr.includes('%40') &&
           decodedQr.includes(`am=${onlineTotal}`) &&
           decodedQr.includes('cu=INR'),
         `${qr.status} amount=${qr.json?.amount} expected=${onlineTotal}`,
