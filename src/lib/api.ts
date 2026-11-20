@@ -63,7 +63,7 @@ export interface RegisterPayload {
   password: string
   full_name: string
   phone: string
-  role: 'customer' | 'owner' | 'rider'
+  role: 'customer' | 'restaurant_owner' | 'rider'
   restaurant?: {
     name: string
     description?: string

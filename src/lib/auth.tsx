@@ -25,14 +25,14 @@ interface AuthValue {
 const AuthContext = createContext<AuthValue | null>(null)
 
 export function homeFor(role: Role | null | undefined): string {
-  if (role === 'owner') return '/owner'
+  if (role === 'restaurant_owner') return '/owner'
   if (role === 'rider') return '/rider'
   if (role === 'admin') return '/admin'
   return '/'
 }
 
 export const roleLabel = (role: Role | null | undefined): string => {
-  if (role === 'owner') return 'Restaurant Partner'
+  if (role === 'restaurant_owner') return 'Restaurant Partner'
   if (role === 'rider') return 'Delivery Rider'
   if (role === 'admin') return 'Administrator'
   return 'Customer'

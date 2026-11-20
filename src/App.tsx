@@ -109,7 +109,7 @@ export default function App() {
       <Route
         path="/owner"
         element={
-          <RequireRole role="owner">
+          <RequireRole role="restaurant_owner">
             <OwnerDashboard />
           </RequireRole>
         }

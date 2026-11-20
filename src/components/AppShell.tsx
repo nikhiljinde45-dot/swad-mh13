@@ -48,7 +48,7 @@ function navFor(role: Role | null, isSignedIn: boolean): NavItem[] {
       { to: '/login', label: 'Sign in', icon: 'shield' },
     ]
   }
-  if (role === 'owner') {
+  if (role === 'restaurant_owner') {
     return [
       { to: '/owner', label: 'Restaurant', icon: 'store' },
       { to: '/owner/orders', label: 'Orders', icon: 'orders' },

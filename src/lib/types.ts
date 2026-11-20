@@ -1,4 +1,4 @@
-export type Role = 'customer' | 'owner' | 'rider' | 'admin'
+export type Role = 'customer' | 'restaurant_owner' | 'rider' | 'admin'
 
 export type OrderStatus =
   | 'placed'

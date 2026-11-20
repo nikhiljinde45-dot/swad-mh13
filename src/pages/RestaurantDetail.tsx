@@ -231,7 +231,7 @@ export default function RestaurantDetail() {
                           <Button
                             size="sm"
                             variant={added === item.id ? 'secondary' : 'primary'}
-                            disabled={!item.is_available || !restaurant.is_active || role === 'owner' || role === 'rider' || role === 'admin'}
+                            disabled={!item.is_available || !restaurant.is_active || role === 'restaurant_owner' || role === 'rider' || role === 'admin'}
                             onClick={() => addToCart(item)}
                           >
                             {added === item.id ? 'Added' : 'Add'}

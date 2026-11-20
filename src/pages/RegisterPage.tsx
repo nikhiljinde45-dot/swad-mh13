@@ -6,11 +6,11 @@ import { ApiError, api } from '../lib/api'
 import { homeFor, useAuth } from '../lib/auth'
 import { fileToDataUrl } from '../lib/image'
 
-type Tab = 'customer' | 'owner' | 'rider'
+type Tab = 'customer' | 'restaurant_owner' | 'rider'
 
 const TABS: { id: Tab; label: string }[] = [
   { id: 'customer', label: 'Customer' },
-  { id: 'owner', label: 'Restaurant Partner' },
+  { id: 'restaurant_owner', label: 'Restaurant Partner' },
   { id: 'rider', label: 'Rider' },
 ]
 
@@ -58,10 +58,10 @@ export default function RegisterPage() {
   const set = (key: keyof FormState) => (event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
     setForm((current) => ({ ...current, [key]: event.target.value }))
 
-  const needsRestaurant = tab === 'owner'
+  const needsRestaurant = tab === 'restaurant_owner'
 
   const heading = useMemo(() => {
-    if (tab === 'owner') return 'Register your restaurant'
+    if (tab === 'restaurant_owner') return 'Register your restaurant'
     if (tab === 'rider') return 'Join as a delivery rider'
     return 'Create your customer account'
   }, [tab])
@@ -178,7 +178,7 @@ export default function RegisterPage() {
       <div className="rounded-2xl bg-white p-4 shadow-sm ring-1 ring-slate-100">
         <h1 className="text-lg font-extrabold text-slate-900">{heading}</h1>
         <p className="mt-1 text-xs text-slate-500">
-          {tab === 'owner'
+          {tab === 'restaurant_owner'
             ? 'Your restaurant stays hidden until an administrator approves it.'
             : tab === 'rider'
               ? 'An administrator assigns deliveries to your rider account.'
@@ -301,7 +301,7 @@ export default function RegisterPage() {
           {busy && stage && <Alert tone="info">{stage}</Alert>}
 
           <Button type="submit" full loading={busy}>
-            {tab === 'owner' ? 'Submit registration' : 'Create account'}
+            {tab === 'restaurant_owner' ? 'Submit registration' : 'Create account'}
           </Button>
         </form>
 

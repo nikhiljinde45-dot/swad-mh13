@@ -91,7 +91,7 @@ export default function OwnerDashboard() {
   }, [])
 
   useEffect(() => {
-    if (role === 'owner') void load()
+    if (role === 'restaurant_owner') void load()
     else setLoading(false)
   }, [role, load])
 
@@ -269,7 +269,7 @@ export default function OwnerDashboard() {
     )
   }
 
-  if (role !== 'owner') {
+  if (role !== 'restaurant_owner') {
     return (
       <AppShell>
         <Alert tone="warning">This dashboard is for restaurant partner accounts.</Alert>

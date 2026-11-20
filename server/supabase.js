@@ -15,7 +15,7 @@ export const configured = Boolean(SUPABASE_URL && SERVICE_KEY)
 
 export const BUCKET = 'food-images'
 export const COOKIE_NAME = 'swad_session'
-export const ROLES = ['customer', 'owner', 'rider', 'admin']
+export const ROLES = ['customer', 'restaurant_owner', 'rider', 'admin']
 
 /**
  * supabase-js constructs a Realtime client eagerly, and on Node 20 that throws

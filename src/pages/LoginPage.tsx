@@ -5,11 +5,11 @@ import { Alert, Button, Field, Input } from '../components/kit'
 import { ApiError } from '../lib/api'
 import { homeFor, useAuth } from '../lib/auth'
 
-type Tab = 'customer' | 'owner' | 'rider'
+type Tab = 'customer' | 'restaurant_owner' | 'rider'
 
 const TABS: { id: Tab; label: string; blurb: string }[] = [
   { id: 'customer', label: 'Customer', blurb: 'Order food from restaurants near you.' },
-  { id: 'owner', label: 'Restaurant Partner', blurb: 'Manage your restaurant, menu and orders.' },
+  { id: 'restaurant_owner', label: 'Restaurant Partner', blurb: 'Manage your restaurant, menu and orders.' },
   { id: 'rider', label: 'Rider', blurb: 'Deliver assigned orders and update status.' },
 ]
 

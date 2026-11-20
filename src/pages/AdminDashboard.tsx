@@ -323,7 +323,7 @@ export default function AdminDashboard() {
                             }
                           >
                             <option value="customer">customer</option>
-                            <option value="owner">owner</option>
+                            <option value="restaurant_owner">restaurant owner</option>
                             <option value="rider">rider</option>
                           </Select>
                         )}

@@ -222,7 +222,7 @@ app.post('/api/auth/register', wrap(async (req, res) => {
 
   // Admin is deliberately impossible here: it can only be granted in SQL.
   const role = clean(body.role) || 'customer'
-  if (!['customer', 'owner', 'rider'].includes(role)) {
+  if (!['customer', 'restaurant_owner', 'rider'].includes(role)) {
     fail(400, 'Choose customer, restaurant partner or rider')
   }
 
@@ -248,7 +248,7 @@ app.post('/api/auth/register', wrap(async (req, res) => {
   if (profileError) fail(500, `Could not create profile: ${profileError.message}`)
 
   let restaurant = null
-  if (role === 'owner' && body.restaurant) {
+  if (role === 'restaurant_owner' && body.restaurant) {
     const r = body.restaurant
     const restaurantCols = await availableColumns('restaurants', RESTAURANT_COLUMNS)
     const { data, error } = await sb
@@ -419,7 +419,7 @@ app.get('/api/orders', requireAuth(), wrap(async (req, res) => {
     query = query.eq('user_id', user.id)
   } else if (profile.role === 'rider') {
     query = query.eq('rider_id', user.id)
-  } else if (profile.role === 'owner') {
+  } else if (profile.role === 'restaurant_owner') {
     const { data: owned } = await sb.from('restaurants').select('id').eq('owner_user_id', user.id)
     const ids = (owned ?? []).map((restaurant) => restaurant.id)
     if (!ids.length) return res.json({ orders: [] })
@@ -442,7 +442,7 @@ app.get('/api/orders/:id', requireAuth(), wrap(async (req, res) => {
 
   const { user, profile } = req.auth
   let allowed = profile.role === 'admin' || order.user_id === user.id || order.rider_id === user.id
-  if (!allowed && profile.role === 'owner') {
+  if (!allowed && profile.role === 'restaurant_owner') {
     const { data: owned } = await sb
       .from('restaurants')
       .select('id')
@@ -573,7 +573,7 @@ async function ownedRestaurant(userId) {
   return data
 }
 
-app.get('/api/owner/restaurant', requireAuth('owner', 'admin'), wrap(async (req, res) => {
+app.get('/api/owner/restaurant', requireAuth('restaurant_owner', 'admin'), wrap(async (req, res) => {
   const restaurant = await ownedRestaurant(req.auth.user.id)
   if (!restaurant) return res.json({ restaurant: null, menu: [], categories: [] })
 
@@ -588,7 +588,7 @@ app.get('/api/owner/restaurant', requireAuth('owner', 'admin'), wrap(async (req,
   res.json({ restaurant, menu: menu ?? [], categories: categories ?? [] })
 }))
 
-app.post('/api/owner/restaurant', requireAuth('owner', 'admin'), wrap(async (req, res) => {
+app.post('/api/owner/restaurant', requireAuth('restaurant_owner', 'admin'), wrap(async (req, res) => {
   const existing = await ownedRestaurant(req.auth.user.id)
   if (existing) fail(400, 'You already registered a restaurant')
 
@@ -616,7 +616,7 @@ app.post('/api/owner/restaurant', requireAuth('owner', 'admin'), wrap(async (req
   res.status(201).json({ restaurant: data })
 }))
 
-app.patch('/api/owner/restaurant', requireAuth('owner', 'admin'), wrap(async (req, res) => {
+app.patch('/api/owner/restaurant', requireAuth('restaurant_owner', 'admin'), wrap(async (req, res) => {
   const restaurant = await ownedRestaurant(req.auth.user.id)
   if (!restaurant) fail(404, 'Register your restaurant first')
 
@@ -645,7 +645,7 @@ app.patch('/api/owner/restaurant', requireAuth('owner', 'admin'), wrap(async (re
   res.json({ restaurant: data })
 }))
 
-app.get('/api/owner/menu', requireAuth('owner', 'admin'), wrap(async (req, res) => {
+app.get('/api/owner/menu', requireAuth('restaurant_owner', 'admin'), wrap(async (req, res) => {
   const restaurant = await ownedRestaurant(req.auth.user.id)
   if (!restaurant) return res.json({ menu: [] })
   const { data, error } = await sb
@@ -672,7 +672,7 @@ function menuPayload(body) {
   return payload
 }
 
-app.post('/api/owner/menu-items', requireAuth('owner', 'admin'), wrap(async (req, res) => {
+app.post('/api/owner/menu-items', requireAuth('restaurant_owner', 'admin'), wrap(async (req, res) => {
   const restaurant = await ownedRestaurant(req.auth.user.id)
   if (!restaurant) fail(400, 'Register your restaurant before adding dishes')
 
@@ -698,7 +698,7 @@ async function ownMenuItem(userId, itemId) {
   return item
 }
 
-app.patch('/api/owner/menu-items/:id', requireAuth('owner', 'admin'), wrap(async (req, res) => {
+app.patch('/api/owner/menu-items/:id', requireAuth('restaurant_owner', 'admin'), wrap(async (req, res) => {
   const item = await ownMenuItem(req.auth.user.id, req.params.id)
   const body = req.body || {}
   const patch = {}
@@ -727,14 +727,14 @@ app.patch('/api/owner/menu-items/:id', requireAuth('owner', 'admin'), wrap(async
   res.json({ item: data })
 }))
 
-app.delete('/api/owner/menu-items/:id', requireAuth('owner', 'admin'), wrap(async (req, res) => {
+app.delete('/api/owner/menu-items/:id', requireAuth('restaurant_owner', 'admin'), wrap(async (req, res) => {
   const item = await ownMenuItem(req.auth.user.id, req.params.id)
   const { error } = await sb.from('menu_items').delete().eq('id', item.id)
   if (error) fail(500, error.message)
   res.json({ ok: true, id: item.id })
 }))
 
-app.get('/api/owner/orders', requireAuth('owner', 'admin'), wrap(async (req, res) => {
+app.get('/api/owner/orders', requireAuth('restaurant_owner', 'admin'), wrap(async (req, res) => {
   const restaurant = await ownedRestaurant(req.auth.user.id)
   if (!restaurant) return res.json({ orders: [] })
   const { data, error } = await sb
@@ -746,7 +746,7 @@ app.get('/api/owner/orders', requireAuth('owner', 'admin'), wrap(async (req, res
   res.json({ orders: await orderRows(data ?? []) })
 }))
 
-app.patch('/api/owner/orders/:id/status', requireAuth('owner', 'admin'), wrap(async (req, res) => {
+app.patch('/api/owner/orders/:id/status', requireAuth('restaurant_owner', 'admin'), wrap(async (req, res) => {
   const restaurant = await ownedRestaurant(req.auth.user.id)
   if (!restaurant) fail(404, 'Register your restaurant first')
 
@@ -833,7 +833,7 @@ app.get('/api/admin/overview', requireAuth('admin'), wrap(async (_req, res) => {
     pending: (restaurants.data ?? []).filter((restaurant) => !restaurant.is_active),
     customers: people.filter((person) => person.role === 'customer'),
     riders: people.filter((person) => person.role === 'rider'),
-    owners: people.filter((person) => person.role === 'owner'),
+    owners: people.filter((person) => person.role === 'restaurant_owner'),
     admins: people.filter((person) => person.role === 'admin'),
     categories: categories.data ?? [],
     orders: orderList,
@@ -874,7 +874,7 @@ app.patch('/api/admin/profiles/:id', requireAuth('admin'), wrap(async (req, res)
   const patch = {}
   if (body.role !== undefined) {
     const role = clean(body.role)
-    if (!['customer', 'owner', 'rider', 'admin'].includes(role)) fail(400, 'Unknown role')
+    if (!['customer', 'restaurant_owner', 'rider', 'admin'].includes(role)) fail(400, 'Unknown role')
     if (req.params.id === req.auth.user.id && role !== 'admin') {
       fail(400, 'You cannot remove your own admin access')
     }
@@ -950,7 +950,7 @@ app.delete('/api/admin/categories/:id', requireAuth('admin'), wrap(async (req, r
 
 const IMAGE_TYPES = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp', 'image/gif': 'gif' }
 
-app.post('/api/uploads', requireAuth('owner', 'admin'), wrap(async (req, res) => {
+app.post('/api/uploads', requireAuth('restaurant_owner', 'admin'), wrap(async (req, res) => {
   const dataUrl = clean(req.body?.dataUrl)
   const match = /^data:(image\/[a-z+.-]+);base64,([A-Za-z0-9+/=]+)$/.exec(dataUrl)
   if (!match) fail(400, 'Choose an image file')

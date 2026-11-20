@@ -177,7 +177,7 @@ async function main() {
         ...OWNER,
         full_name: 'QA Owner',
         phone: '9876543212',
-        role: 'owner',
+        role: 'restaurant_owner',
         restaurant: {
           name: `QA Kitchen ${stamp}`,
           description: 'Automated test kitchen',
@@ -233,7 +233,7 @@ async function main() {
         password: 'SwadTest!2026',
         full_name: 'QA Other Owner',
         phone: '9876543213',
-        role: 'owner',
+        role: 'restaurant_owner',
         restaurant: {
           name: `QA Other Kitchen ${stamp}`,
           description: 'Second test kitchen',
