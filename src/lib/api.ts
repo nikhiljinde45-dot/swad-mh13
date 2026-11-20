@@ -24,6 +24,36 @@ export class ApiError extends Error {
 
 type RequestOptions = { method?: string; body?: unknown; signal?: AbortSignal }
 
+export type PaymentMethodId = 'cod' | 'upi' | 'online'
+
+export interface PaymentMethodOption {
+  id: PaymentMethodId
+  label: string
+  online?: boolean
+}
+
+export interface PaymentsConfig {
+  online_enabled: boolean
+  provider: string | null
+  currency: string
+  upi_vpa: string | null
+  payee_name: string | null
+  qr_image_url: string | null
+  methods: PaymentMethodOption[]
+}
+
+export interface PaymentQr {
+  order_id: string
+  amount: number
+  payment_status: string
+  payment_method: string
+  reference: string
+  upi_string: string | null
+  upi_vpa: string | null
+  payee_name: string | null
+  qr_image_url: string | null
+}
+
 async function request<T>(path: string, { method = 'GET', body, signal }: RequestOptions = {}): Promise<T> {
   let response: Response
   try {
@@ -136,16 +166,13 @@ export const api = {
     full_address?: string
     city?: string
     pincode?: string
-    payment_method?: 'cod' | 'upi'
+    payment_method?: PaymentMethodId
     notes?: string
   }) => request<{ order: Order }>('/api/orders', { method: 'POST', body: payload }),
-  paymentConfig: () =>
-    request<{
-      online_enabled: boolean
-      provider: string | null
-      currency: string
-      methods: { id: 'cod' | 'upi'; label: string }[]
-    }>('/api/payments/config'),
+  paymentConfig: () => request<PaymentsConfig>('/api/payments/config'),
+  paymentQr: (orderId: string) => request<PaymentQr>(`/api/orders/${orderId}/payment-qr`),
+  claimPayment: (orderId: string) =>
+    request<{ order: Order }>(`/api/orders/${orderId}/payment/claim`, { method: 'POST' }),
   orders: () => request<{ orders: Order[] }>('/api/orders'),
   order: (id: string) => request<{ order: Order }>(`/api/orders/${id}`),
 
