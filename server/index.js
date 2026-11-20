@@ -247,20 +247,26 @@ app.post('/api/auth/register', wrap(async (req, res) => {
   let restaurant = null
   if (role === 'owner' && body.restaurant) {
     const r = body.restaurant
+    const restaurantCols = await availableColumns('restaurants', RESTAURANT_COLUMNS)
     const { data, error } = await sb
       .from('restaurants')
-      .insert({
-        owner_user_id: userId,
-        name: requireText(r.name, 'Restaurant name', { min: 2, max: 120 }),
-        description: clean(r.description),
-        address: requireText(r.address, 'Restaurant address', { min: 5 }),
-        city: requireText(r.city, 'City', { min: 2 }),
-        pincode: requireText(r.pincode, 'PIN code', { min: 4, max: 10 }),
-        owner_name: fullName,
-        owner_phone: phone,
-        image_url: clean(r.image_url) || null,
-        is_active: false,
-      })
+      .insert(
+        pick(
+          {
+            owner_user_id: userId,
+            name: requireText(r.name, 'Restaurant name', { min: 2, max: 120 }),
+            description: clean(r.description),
+            address: requireText(r.address, 'Restaurant address', { min: 5 }),
+            city: clean(r.city),
+            pincode: clean(r.pincode),
+            owner_name: fullName,
+            owner_phone: phone,
+            image_url: clean(r.image_url) || null,
+            is_active: false,
+          },
+          restaurantCols,
+        ),
+      )
       .select()
       .single()
     if (error) fail(500, `Could not save restaurant: ${error.message}`)
