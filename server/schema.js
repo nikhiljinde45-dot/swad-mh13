@@ -62,3 +62,9 @@ export const MENU_COLUMNS = [
 ]
 
 export const PROFILE_COLUMNS = ['id', 'full_name', 'phone', 'email', 'role', 'is_blocked']
+
+export const ADDRESS_COLUMNS = [
+  'user_id', 'full_address', 'city', 'pincode', 'label', 'landmark', 'phone', 'is_default',
+]
+
+export const ORDER_ITEM_COLUMNS = ['order_id', 'menu_item_id', 'quantity', 'name', 'price']

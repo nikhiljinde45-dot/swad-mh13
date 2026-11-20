@@ -15,7 +15,7 @@ import {
   decodeSession,
   revokeSession,
 } from './supabase.js'
-import { availableColumns, pick, ORDER_COLUMNS, RESTAURANT_COLUMNS, MENU_COLUMNS, PROFILE_COLUMNS } from './schema.js'
+import { availableColumns, pick, ORDER_COLUMNS, RESTAURANT_COLUMNS, MENU_COLUMNS, PROFILE_COLUMNS, ADDRESS_COLUMNS, ORDER_ITEM_COLUMNS } from './schema.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const PORT = Number(process.env.PORT || 3000)
@@ -365,7 +365,7 @@ app.post('/api/auth/password', requireAuth(), wrap(async (req, res) => {
 app.get('/api/addresses', requireAuth('customer', 'admin'), wrap(async (req, res) => {
   const { data, error } = await sb
     .from('addresses')
-    .select('id, user_id, full_address, city, pincode, created_at')
+    .select('*')
     .eq('user_id', req.auth.user.id)
     .order('created_at', { ascending: false })
   if (error) fail(500, error.message)
@@ -373,12 +373,13 @@ app.get('/api/addresses', requireAuth('customer', 'admin'), wrap(async (req, res
 }))
 
 app.post('/api/addresses', requireAuth('customer', 'admin'), wrap(async (req, res) => {
-  const payload = {
+  const addressCols = await availableColumns('addresses', ADDRESS_COLUMNS)
+  const payload = pick({
     user_id: req.auth.user.id,
     full_address: requireText(req.body?.full_address, 'Delivery address', { min: 6, max: 300 }),
     city: requireText(req.body?.city, 'City', { min: 2, max: 80 }),
     pincode: requireText(req.body?.pincode, 'PIN code', { min: 4, max: 10 }),
-  }
+  }, addressCols)
   const { data, error } = await sb.from('addresses').insert(payload).select().single()
   if (error) fail(500, error.message)
   res.status(201).json({ address: data })
@@ -398,13 +399,31 @@ app.delete('/api/addresses/:id', requireAuth('customer', 'admin'), wrap(async (r
 
 async function orderRows(orders) {
   if (!orders.length) return []
-  const ids = [...new Set(orders.map((order) => order.user_id).filter(Boolean))]
-  if (!ids.length) return orders
-  const { data: people } = await sb.from('profiles').select('id, full_name, phone').in('id', ids)
-  const byId = new Map((people ?? []).map((person) => [person.id, person]))
+  const userIds = [...new Set(orders.map((order) => order.user_id).filter(Boolean))]
+  const itemIds = [
+    ...new Set(
+      orders.flatMap((order) => (order.order_items ?? []).map((item) => item.menu_item_id)).filter(Boolean),
+    ),
+  ]
+
+  const [people, dishes] = await Promise.all([
+    userIds.length ? sb.from('profiles').select('id, full_name, phone').in('id', userIds) : { data: [] },
+    itemIds.length ? sb.from('menu_items').select('id, name, price').in('id', itemIds) : { data: [] },
+  ])
+
+  const peopleById = new Map((people?.data ?? []).map((person) => [person.id, person]))
+  const dishById = new Map((dishes?.data ?? []).map((dish) => [dish.id, dish]))
+
   return orders.map((order) => ({
     ...order,
-    customer: byId.get(order.user_id) ?? null,
+    customer: peopleById.get(order.user_id) ?? null,
+    // The live order_items table stores only menu_item_id + quantity, so the
+    // dish name and price are resolved from menu_items for display.
+    order_items: (order.order_items ?? []).map((item) => {
+      const dish = dishById.get(item.menu_item_id) ?? {}
+      const price = item.price ?? dish.price ?? 0
+      return { ...item, name: item.name ?? dish.name ?? 'Item', price, unit_price: price }
+    }),
   }))
 }
 
@@ -418,6 +437,8 @@ app.get('/api/orders', requireAuth(), wrap(async (req, res) => {
   if (profile.role === 'customer') {
     query = query.eq('user_id', user.id)
   } else if (profile.role === 'rider') {
+    const riderCols = await availableColumns('orders', ORDER_COLUMNS)
+    if (!riderCols.includes('rider_id')) return res.json({ orders: [], riderAssignmentReady: false })
     query = query.eq('rider_id', user.id)
   } else if (profile.role === 'restaurant_owner') {
     const { data: owned } = await sb.from('restaurants').select('id').eq('owner_user_id', user.id)
@@ -468,7 +489,7 @@ app.post('/api/orders', requireAuth('customer', 'admin'), wrap(async (req, res) 
 
   const { data: restaurant, error: restaurantError } = await sb
     .from('restaurants')
-    .select('id, name, delivery_fee, is_active')
+    .select('*')
     .eq('id', restaurantId)
     .maybeSingle()
   if (restaurantError) fail(500, restaurantError.message)
@@ -509,7 +530,7 @@ app.post('/api/orders', requireAuth('customer', 'admin'), wrap(async (req, res) 
   if (addressId) {
     const { data: address } = await sb
       .from('addresses')
-      .select('id, user_id, full_address, city, pincode')
+      .select('*')
       .eq('id', addressId)
       .eq('user_id', req.auth.user.id)
       .maybeSingle()
@@ -519,9 +540,10 @@ app.post('/api/orders', requireAuth('customer', 'admin'), wrap(async (req, res) 
     const fullAddress = requireText(body.full_address, 'Delivery address', { min: 6, max: 300 })
     const city = requireText(body.city, 'City', { min: 2, max: 80 })
     const pincode = requireText(body.pincode, 'PIN code', { min: 4, max: 10 })
+    const newAddressCols = await availableColumns('addresses', ADDRESS_COLUMNS)
     const { data: address, error: addressError } = await sb
       .from('addresses')
-      .insert({ user_id: req.auth.user.id, full_address: fullAddress, city, pincode })
+      .insert(pick({ user_id: req.auth.user.id, full_address: fullAddress, city, pincode }, newAddressCols))
       .select()
       .single()
     if (addressError) fail(500, `Could not save address: ${addressError.message}`)
@@ -551,8 +573,20 @@ app.post('/api/orders', requireAuth('customer', 'admin'), wrap(async (req, res) 
     .single()
   if (orderError) fail(500, `Could not place order: ${orderError.message}`)
 
+  const itemCols = await availableColumns('order_items', ORDER_ITEM_COLUMNS)
   const { error: itemsError } = await sb.from('order_items').insert(
-    priced.map((line) => ({ order_id: order.id, ...line })),
+    priced.map((line) =>
+      pick(
+        {
+          order_id: order.id,
+          menu_item_id: line.menu_item_id,
+          quantity: line.quantity,
+          name: line.item_name,
+          price: line.unit_price,
+        },
+        itemCols,
+      ),
+    ),
   )
   if (itemsError) fail(500, `Could not save order items: ${itemsError.message}`)
 
@@ -777,17 +811,27 @@ app.patch('/api/owner/orders/:id/status', requireAuth('restaurant_owner', 'admin
 /* ------------------------------ rider ----------------------------- */
 
 app.get('/api/rider/orders', requireAuth('rider', 'admin'), wrap(async (req, res) => {
+  const riderCols = await availableColumns('orders', ORDER_COLUMNS)
+  if (!riderCols.includes('rider_id')) {
+    // Live orders table has no rider assignment column yet; the admin panel
+    // reports this so the owner can run the migration.
+    return res.json({ orders: [], riderAssignmentReady: false })
+  }
   const { data, error } = await sb
     .from('orders')
     .select(ORDER_SELECT)
     .eq('rider_id', req.auth.user.id)
     .order('created_at', { ascending: false })
   if (error) fail(500, error.message)
-  res.json({ orders: await orderRows(data ?? []) })
+  res.json({ orders: await orderRows(data ?? []), riderAssignmentReady: true })
 }))
 
 app.patch('/api/rider/orders/:id/status', requireAuth('rider', 'admin'), wrap(async (req, res) => {
   const status = clean(req.body?.status)
+  const riderReady = await availableColumns('orders', ORDER_COLUMNS)
+  if (!riderReady.includes('rider_id')) {
+    fail(409, 'Rider assignment is not enabled in the database yet. Run the SQL in supabase/migrations to add orders.rider_id.')
+  }
   const { data: order } = await sb
     .from('orders')
     .select('id, rider_id, order_status')
