@@ -187,7 +187,10 @@ async function seedSupabase() {
   }
 }
 
-const useSupabase = () => status.mode === 'supabase'
+// A table that does not exist in the project yet is served from the in-memory
+// demo store, so every panel stays usable while the schema is being applied.
+const useSupabase = (table) =>
+  status.mode === 'supabase' && !(table && status.missingTables.includes(table))
 
 /** Every table the app reads. supabase/schema.sql creates all of them. */
 const REQUIRED_TABLES = ['restaurants', 'menu_items', 'riders', 'customers', 'orders']
@@ -222,7 +225,7 @@ export async function detectMissingTables() {
   }
 
   status.warning = status.missingTables.length
-    ? `Connected to Supabase, but these tables do not exist yet: ${status.missingTables.join(', ')}. Run supabase/schema.sql in the Supabase SQL editor to create them.`
+    ? `Connected to Supabase. These tables do not exist yet: ${status.missingTables.join(', ')} — their panels are running on built-in demo data. Run supabase/schema.sql in the Supabase SQL editor to save that data in your own database.`
     : null
   return status.missingTables
 }
@@ -257,7 +260,7 @@ async function maps() {
 
 export async function listRestaurants({ category } = {}) {
   let rows
-  if (useSupabase()) {
+  if (useSupabase('restaurants')) {
     let q = sb.from('restaurants').select('*').order('name')
     if (category && category !== 'all') q = q.eq('category', category)
     const { data, error } = await q
@@ -271,7 +274,7 @@ export async function listRestaurants({ category } = {}) {
 }
 
 export async function getRestaurant(id) {
-  if (useSupabase()) {
+  if (useSupabase('restaurants')) {
     const { data, error } = await sb.from('restaurants').select('*').eq('id', id).maybeSingle()
     if (error) throw new Error(error.message)
     return data
@@ -298,7 +301,7 @@ export async function updateRestaurant(id, patch) {
   }
   if (!Object.keys(clean).length) throw new Error('No updatable fields supplied')
 
-  if (useSupabase()) {
+  if (useSupabase('restaurants')) {
     const { data, error } = await sb.from('restaurants').update(clean).eq('id', id).select().maybeSingle()
     if (error) throw new Error(error.message)
     if (!data) throw new Error('Restaurant not found')
@@ -317,7 +320,7 @@ export async function updateRestaurant(id, patch) {
 
 export async function listMenu(restaurantId) {
   let rows
-  if (useSupabase()) {
+  if (useSupabase('menu_items')) {
     const { data, error } = await sb
       .from('menu_items')
       .select('*')
@@ -358,7 +361,7 @@ export async function createMenuItem(payload) {
     image_url: payload.image_url || null,
   }
 
-  if (useSupabase()) {
+  if (useSupabase('menu_items')) {
     const { data, error } = await sb.from('menu_items').insert(row).select().maybeSingle()
     if (error) throw new Error(error.message)
     return data
@@ -390,7 +393,7 @@ export async function updateMenuItem(id, patch) {
   }
   if (!Object.keys(clean).length) throw new Error('No updatable fields supplied')
 
-  if (useSupabase()) {
+  if (useSupabase('menu_items')) {
     const { data, error } = await sb.from('menu_items').update(clean).eq('id', id).select().maybeSingle()
     if (error) throw new Error(error.message)
     if (!data) throw new Error('Menu item not found')
@@ -404,7 +407,7 @@ export async function updateMenuItem(id, patch) {
 }
 
 export async function deleteMenuItem(id) {
-  if (useSupabase()) {
+  if (useSupabase('menu_items')) {
     const { error } = await sb.from('menu_items').delete().eq('id', id)
     if (error) throw new Error(error.message)
     return { id, deleted: true }
@@ -421,7 +424,7 @@ export async function deleteMenuItem(id) {
 
 export async function listOrders({ customer_id, restaurant_id, rider_id, status: orderStatus } = {}) {
   let rows
-  if (useSupabase()) {
+  if (useSupabase('orders')) {
     let q = sb.from('orders').select('*').order('created_at', { ascending: false })
     if (customer_id) q = q.eq('customer_id', customer_id)
     if (restaurant_id) q = q.eq('restaurant_id', restaurant_id)
@@ -449,7 +452,7 @@ export async function listOrders({ customer_id, restaurant_id, rider_id, status:
 
 export async function getOrder(id) {
   let order
-  if (useSupabase()) {
+  if (useSupabase('orders')) {
     const { data, error } = await sb.from('orders').select('*').eq('id', id).maybeSingle()
     if (error) throw new Error(error.message)
     order = data
@@ -518,7 +521,7 @@ export async function createOrder(payload) {
     updated_at: now(),
   }
 
-  if (useSupabase()) {
+  if (useSupabase('orders')) {
     const { data, error } = await sb.from('orders').insert(order).select().maybeSingle()
     if (error) throw new Error(error.message)
     await touchCustomer(data, { name, phone, address })
@@ -535,7 +538,7 @@ async function touchCustomer(order, { name, phone, address }) {
   const existing = await getCustomerByPhone(phone)
   if (existing) {
     const orders = (existing.orders || 0) + 1
-    if (useSupabase()) {
+    if (useSupabase('customers')) {
       await sb.from('customers').update({ orders, address }).eq('id', existing.id)
     } else {
       const row = memory.customers.find((c) => c.id === existing.id)
@@ -553,7 +556,7 @@ async function touchCustomer(order, { name, phone, address }) {
     created_at: now(),
     is_blocked: false,
   }
-  if (useSupabase()) {
+  if (useSupabase('customers')) {
     await sb.from('customers').insert(row)
   } else {
     memory.customers.push(row)
@@ -579,7 +582,7 @@ export async function updateOrder(id, patch) {
   if (!Object.keys(clean).length) throw new Error('Nothing to update')
   clean.updated_at = now()
 
-  if (useSupabase()) {
+  if (useSupabase('orders')) {
     const { data, error } = await sb.from('orders').update(clean).eq('id', id).select().maybeSingle()
     if (error) throw new Error(error.message)
     const { restaurantMap, riderMap } = await maps()
@@ -597,7 +600,7 @@ export async function updateOrder(id, patch) {
 /* ------------------------------------------------------------------ */
 
 export async function listRiders() {
-  if (useSupabase()) {
+  if (useSupabase('riders')) {
     const { data, error } = await sb.from('riders').select('*').order('name')
     if (error) {
       if (isMissingTableError(error)) return degradeForMissingTable('riders', error, [])
@@ -620,7 +623,7 @@ export async function updateRider(id, patch) {
   if (patch.vehicle !== undefined) clean.vehicle = String(patch.vehicle).trim()
   if (!Object.keys(clean).length) throw new Error('Nothing to update')
 
-  if (useSupabase()) {
+  if (useSupabase('riders')) {
     const { data, error } = await sb.from('riders').update(clean).eq('id', id).select().maybeSingle()
     if (error) throw new Error(error.message)
     if (!data) throw new Error('Rider not found')
@@ -647,7 +650,7 @@ export async function createRider(payload) {
     deliveries: 0,
     rating: 5,
   }
-  if (useSupabase()) {
+  if (useSupabase('riders')) {
     const { data, error } = await sb.from('riders').insert(row).select().maybeSingle()
     if (error) throw new Error(error.message)
     return data
@@ -657,7 +660,7 @@ export async function createRider(payload) {
 }
 
 export async function deleteRider(id) {
-  if (useSupabase()) {
+  if (useSupabase('riders')) {
     const { error } = await sb.from('riders').delete().eq('id', id)
     if (error) throw new Error(error.message)
     return { id, deleted: true }
@@ -673,7 +676,7 @@ export async function deleteRider(id) {
 /* ------------------------------------------------------------------ */
 
 export async function listCustomers() {
-  if (useSupabase()) {
+  if (useSupabase('customers')) {
     const { data, error } = await sb.from('customers').select('*').order('created_at', { ascending: false })
     if (error) {
       if (isMissingTableError(error)) return degradeForMissingTable('customers', error, [])
@@ -687,7 +690,7 @@ export async function listCustomers() {
 export async function getCustomerByPhone(phone) {
   const clean = String(phone || '').trim()
   if (!clean) return null
-  if (useSupabase()) {
+  if (useSupabase('customers')) {
     const { data, error } = await sb.from('customers').select('*').eq('phone', clean).maybeSingle()
     if (error) return null
     return data
@@ -696,7 +699,7 @@ export async function getCustomerByPhone(phone) {
 }
 
 export async function getCustomer(id) {
-  if (useSupabase()) {
+  if (useSupabase('customers')) {
     const { data, error } = await sb.from('customers').select('*').eq('id', id).maybeSingle()
     if (error) throw new Error(error.message)
     return data
@@ -711,7 +714,7 @@ export async function updateCustomer(id, patch) {
   if (patch.address !== undefined) clean.address = String(patch.address).trim()
   if (!Object.keys(clean).length) throw new Error('Nothing to update')
 
-  if (useSupabase()) {
+  if (useSupabase('customers')) {
     const { data, error } = await sb.from('customers').update(clean).eq('id', id).select().maybeSingle()
     if (error) throw new Error(error.message)
     if (!data) throw new Error('Customer not found')
@@ -724,7 +727,7 @@ export async function updateCustomer(id, patch) {
 }
 
 export async function deleteCustomer(id) {
-  if (useSupabase()) {
+  if (useSupabase('customers')) {
     const { error } = await sb.from('customers').delete().eq('id', id)
     if (error) throw new Error(error.message)
     return { id, deleted: true }
