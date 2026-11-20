@@ -1,4 +1,5 @@
 import express from 'express'
+import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import {
@@ -18,6 +19,8 @@ import {
 import { availableColumns, pick, ORDER_COLUMNS, RESTAURANT_COLUMNS, MENU_COLUMNS, PROFILE_COLUMNS, ADDRESS_COLUMNS, ORDER_ITEM_COLUMNS } from './schema.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
+const DIST_DIR = path.resolve(__dirname, '..', 'dist')
+const PUBLIC_DIR = path.resolve(__dirname, '..', 'public')
 const PORT = Number(process.env.PORT || 3000)
 
 const app = express()
@@ -137,18 +140,63 @@ app.get('/api/config', wrap(async (_req, res) => {
 
 /* --------------------------- public data -------------------------- */
 
-// Payment options that work without a payment provider: the customer pays the
-// rider on delivery. Online payment stays off until a gateway is connected.
-app.get('/api/payments/config', wrap(async (_req, res) => {
-  res.json({
-    online_enabled: false,
-    provider: null,
+/* ---------------------------- payments ---------------------------- */
+
+// Payments work without a paid gateway: money moves over UPI straight to the
+// restaurant's UPI ID (VPA). The server builds a dynamic UPI intent for the
+// exact order amount, so the customer's app is pre-filled and the amount can
+// never be tampered with in the browser. A static QR image (yours) is used
+// instead when one is supplied.
+const UPI_VPA = clean(process.env.UPI_VPA)
+const UPI_PAYEE_NAME = clean(process.env.UPI_PAYEE_NAME) || 'Swad MH13'
+const UPI_RE = /^[a-z0-9._-]{2,64}@[a-z]{2,32}$/i
+const QR_FILE_NAMES = ['payment-qr.png', 'payment-qr.jpg', 'payment-qr.jpeg', 'payment-qr.webp']
+
+const PAYMENT_METHODS = [
+  { id: 'cod', label: 'Cash on delivery', online: false },
+  { id: 'upi', label: 'UPI on delivery', online: false },
+  { id: 'online', label: 'Pay online now (UPI)', online: true },
+]
+
+function staticQrUrl() {
+  const fromEnv = clean(process.env.PAYMENT_QR_IMAGE_URL)
+  if (fromEnv) return fromEnv
+  for (const name of QR_FILE_NAMES) {
+    if (fs.existsSync(path.join(DIST_DIR, name)) || fs.existsSync(path.join(PUBLIC_DIR, name))) {
+      return `/${name}`
+    }
+  }
+  return null
+}
+
+function paymentSettings() {
+  const vpa = UPI_RE.test(UPI_VPA) ? UPI_VPA : null
+  const qrImage = staticQrUrl()
+  return {
+    online_enabled: Boolean(vpa || qrImage),
+    provider: 'upi',
     currency: 'INR',
-    methods: [
-      { id: 'cod', label: 'Cash on delivery' },
-      { id: 'upi', label: 'UPI on delivery' },
-    ],
+    upi_vpa: vpa,
+    payee_name: UPI_PAYEE_NAME,
+    qr_image_url: qrImage,
+  }
+}
+
+const orderReference = (order) => `Swad MH13 order ${String(order.id).slice(0, 8).toUpperCase()}`
+
+function upiPaymentString(order, settings) {
+  const params = new URLSearchParams({
+    pa: settings.upi_vpa,
+    pn: settings.payee_name,
+    am: number(order.total_amount).toFixed(2),
+    cu: 'INR',
+    tn: orderReference(order),
   })
+  return `upi://pay?${params.toString()}`
+}
+
+app.get('/api/payments/config', wrap(async (_req, res) => {
+  res.json({ ...paymentSettings(), methods: PAYMENT_METHODS })
 }))
 
 app.get('/api/categories', wrap(async (_req, res) => {
@@ -492,6 +540,69 @@ app.get('/api/orders/:id', requireAuth(), wrap(async (req, res) => {
   res.json({ order })
 }))
 
+// Payment details for one order. The amount always comes from the database, so
+// the browser cannot ask to pay less than the real total.
+app.get('/api/orders/:id/payment-qr', requireAuth(), wrap(async (req, res) => {
+  const { data: order, error } = await sb.from('orders').select('*').eq('id', req.params.id).maybeSingle()
+  if (error) fail(500, error.message)
+  if (!order) fail(404, 'Order not found')
+
+  const userId = req.auth.user.id
+  const role = req.auth.profile.role
+  let allowed = role === 'admin' || order.user_id === userId || order.rider_id === userId
+
+  if (!allowed && role === 'restaurant_owner') {
+    const { data: owned } = await sb
+      .from('restaurants')
+      .select('id')
+      .eq('id', order.restaurant_id)
+      .eq('owner_user_id', userId)
+      .maybeSingle()
+    allowed = Boolean(owned)
+  }
+  if (!allowed) fail(403, 'You cannot view this payment')
+
+  const settings = paymentSettings()
+  if (!settings.online_enabled) fail(409, 'Online payment is not configured yet')
+
+  res.json({
+    order_id: order.id,
+    amount: number(order.total_amount),
+    payment_status: order.payment_status ?? 'pending',
+    payment_method: order.payment_method ?? 'cod',
+    reference: orderReference(order),
+    upi_string: settings.upi_vpa ? upiPaymentString(order, settings) : null,
+    upi_vpa: settings.upi_vpa,
+    payee_name: settings.payee_name,
+    qr_image_url: settings.qr_image_url,
+  })
+}))
+
+// The customer confirms an online UPI transfer. Money moves between the
+// customer's UPI app and the restaurant's UPI ID, so the app only records the
+// claim; the amount and order are still validated against the database.
+app.post('/api/orders/:id/payment/claim', requireAuth('customer', 'admin'), wrap(async (req, res) => {
+  const { data: order, error } = await sb.from('orders').select('*').eq('id', req.params.id).maybeSingle()
+  if (error) fail(500, error.message)
+  if (!order) fail(404, 'Order not found')
+  if (order.user_id !== req.auth.user.id && req.auth.profile.role !== 'admin') {
+    fail(403, 'You cannot update this order')
+  }
+  if (order.payment_status === 'paid') return res.json({ order })
+  if (order.payment_method !== 'online') fail(400, 'This order is paid on delivery, not online')
+  if (['cancelled', 'rejected'].includes(order.order_status)) fail(400, 'This order was cancelled')
+
+  const orderColumns = await availableColumns('orders', ORDER_COLUMNS)
+  const { data, error: updateError } = await sb
+    .from('orders')
+    .update(pick({ payment_status: 'paid' }, orderColumns))
+    .eq('id', order.id)
+    .select(ORDER_SELECT)
+    .single()
+  if (updateError) fail(500, updateError.message)
+  res.json({ order: data })
+}))
+
 app.post('/api/orders', requireAuth('customer', 'admin'), wrap(async (req, res) => {
   const body = req.body || {}
   const restaurantId = requireText(body.restaurant_id, 'Restaurant')
@@ -500,11 +611,13 @@ app.post('/api/orders', requireAuth('customer', 'admin'), wrap(async (req, res) 
   if (rawItems.length > 40) fail(400, 'Too many different items in one order')
 
   const requestedPayment = clean(body.payment_method) || 'cod'
-  if (requestedPayment === 'online') {
-    fail(400, 'Online payment is not enabled yet — choose cash or UPI on delivery')
-  }
-  if (!['cod', 'upi'].includes(requestedPayment)) {
-    fail(400, 'Choose cash on delivery or UPI on delivery')
+  const payments = paymentSettings()
+  const allowedPayments = payments.online_enabled ? ['cod', 'upi', 'online'] : ['cod', 'upi']
+  if (!allowedPayments.includes(requestedPayment)) {
+    if (requestedPayment === 'online') {
+      fail(400, 'Online payment is not configured yet — choose cash or UPI on delivery')
+    }
+    fail(400, 'Choose cash on delivery, UPI on delivery or pay online')
   }
   const paymentMethod = requestedPayment
   const notes = clean(body.notes).slice(0, 400)
@@ -1065,7 +1178,7 @@ app.use('/api', (_req, res) => {
   res.status(404).json({ error: 'API route not found' })
 })
 
-const distDir = path.resolve(__dirname, '..', 'dist')
+const distDir = DIST_DIR
 app.use(express.static(distDir, { index: false, maxAge: '1h' }))
 
 // Express 5: '/{*splat}' is the pattern that also matches '/'.
