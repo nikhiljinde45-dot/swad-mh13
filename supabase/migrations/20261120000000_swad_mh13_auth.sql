@@ -100,6 +100,22 @@ alter table public.addresses   enable row level security;
 alter table public.orders      enable row level security;
 alter table public.order_items enable row level security;
 
+-- Replace every policy on these seven tables with the canonical set below, so
+-- an older/leftover permissive policy cannot silently widen access. Policies
+-- are re-created immediately; no table or row is touched.
+do $$
+declare p record;
+begin
+  for p in
+    select schemaname, tablename, policyname from pg_policies
+    where schemaname = 'public'
+      and tablename in ('profiles', 'restaurants', 'categories',
+                        'menu_items', 'addresses', 'orders', 'order_items')
+  loop
+    execute format('drop policy if exists %I on %I.%I', p.policyname, p.schemaname, p.tablename);
+  end loop;
+end $$;
+
 -- ---------------------------------------------------------------- profiles --
 drop policy if exists profiles_select on public.profiles;
 create policy profiles_select on public.profiles for select to authenticated
