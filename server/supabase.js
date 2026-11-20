@@ -17,10 +17,27 @@ export const BUCKET = 'food-images'
 export const COOKIE_NAME = 'swad_session'
 export const ROLES = ['customer', 'owner', 'rider', 'admin']
 
+/**
+ * supabase-js constructs a Realtime client eagerly, and on Node 20 that throws
+ * because the runtime has no global WebSocket. This app never opens a realtime
+ * socket (it reads through the REST/Auth APIs only), so an inert transport
+ * keeps server startup working on every supported Node version.
+ */
+class InertSocket {
+  constructor() {
+    this.readyState = 3
+  }
+  addEventListener() {}
+  removeEventListener() {}
+  send() {}
+  close() {}
+}
+
 export const sb = configured
   ? createClient(SUPABASE_URL, SERVICE_KEY, {
       auth: { autoRefreshToken: false, persistSession: false, detectSessionInUrl: false },
       global: { headers: { 'x-application-name': 'swad-mh13' } },
+      realtime: { transport: InertSocket },
     })
   : null
 
