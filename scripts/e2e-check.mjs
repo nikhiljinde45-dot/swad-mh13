@@ -269,6 +269,160 @@ async function main() {
       body: { restaurant_id: restaurant?.id, items: [{ menu_item_id: itemId, quantity: 1 }] },
     })
     check('ordering requires a signed-in customer', guestOrder.status === 401, `${guestOrder.status}`)
+
+    /* ---------------- rider assignment end-to-end ---------------- */
+    // orders.rider_id only exists once supabase/migrations has been applied.
+    const riderProbe = await sb.from('orders').select('rider_id').limit(1)
+    if (riderProbe.error) {
+      console.log(
+        'SKIP  rider assignment flow — orders.rider_id is missing. Run supabase/migrations/20261120000000_swad_mh13_auth.sql, then re-run this script.',
+      )
+    } else {
+      const RIDER_EMAIL = `qa.rider.${stamp}@example.com`
+      const ADMIN_EMAIL = `qa.admin.${stamp}@example.com`
+      const PASSWORD = 'SwadTest!2026'
+
+      const riderReg = await makeClient().call('/api/auth/register', {
+        method: 'POST',
+        body: { email: RIDER_EMAIL, password: PASSWORD, full_name: 'QA Rider', phone: '9876543214', role: 'rider' },
+      })
+      const riderId = riderReg.json?.user?.id
+      if (riderId) created.users.push(riderId)
+
+      // Administrator rights can only come from the database, never the form.
+      const adminReg = await makeClient().call('/api/auth/register', {
+        method: 'POST',
+        body: { email: ADMIN_EMAIL, password: PASSWORD, full_name: 'QA Admin', phone: '9876543215', role: 'customer' },
+      })
+      const adminId = adminReg.json?.user?.id
+      if (adminId) created.users.push(adminId)
+      await sb.from('profiles').update({ role: 'admin' }).eq('id', adminId)
+
+      const rider = makeClient()
+      const riderLogin = await rider.call('/api/auth/login', {
+        method: 'POST',
+        body: { email: RIDER_EMAIL, password: PASSWORD },
+      })
+      check('rider signs in with the rider role', riderLogin.json?.user?.role === 'rider', `${riderLogin.status}`)
+
+      const admin = makeClient()
+      const adminLogin = await admin.call('/api/auth/login', {
+        method: 'POST',
+        body: { email: ADMIN_EMAIL, password: PASSWORD },
+      })
+      check('admin signs in with the administrator role', adminLogin.json?.user?.role === 'admin', `${adminLogin.status}`)
+
+      // A restaurant must be approved before customers can order from it.
+      await sb.from('restaurants').update({ is_active: true }).eq('id', restaurant.id)
+      const riderItem = await owner.call('/api/owner/menu-items', {
+        method: 'POST',
+        body: { name: `Rider Flow ${stamp}`, description: 'Delivery test dish', price: 120, is_available: true },
+      })
+      const riderItemId = riderItem.json?.item?.id
+      if (riderItemId) created.menuItems.push(riderItemId)
+
+      const placed = await customer.call('/api/orders', {
+        method: 'POST',
+        body: {
+          restaurant_id: restaurant.id,
+          items: [{ menu_item_id: riderItemId, quantity: 2 }],
+          full_address: '12 Rider Test Road',
+          city: 'Nashik',
+          pincode: '422001',
+          payment_method: 'cod',
+        },
+      })
+      const orderId = placed.json?.order?.id
+      if (orderId) created.orders.push(orderId)
+      check(
+        'customer places an order for the rider flow',
+        placed.status === 201 && Boolean(orderId),
+        `${placed.status} ${placed.json?.error ?? ''}`,
+      )
+
+      for (const status of ['accepted', 'preparing', 'ready']) {
+        await owner.call(`/api/owner/orders/${orderId}/status`, { method: 'PATCH', body: { status } })
+      }
+      const ownerOrders = await owner.call('/api/owner/orders')
+      const readyOrder = (ownerOrders.json?.orders ?? []).find((row) => row.id === orderId)
+      check(
+        'owner moves the order to ready for pickup',
+        readyOrder?.order_status === 'ready',
+        `${readyOrder?.order_status ?? 'missing'}`,
+      )
+
+      const ownerAssign = await owner.call(`/api/admin/orders/${orderId}/assign`, {
+        method: 'PATCH',
+        body: { rider_id: riderId },
+      })
+      check('a restaurant owner cannot assign riders', ownerAssign.status === 403, `${ownerAssign.status}`)
+
+      const assigned = await admin.call(`/api/admin/orders/${orderId}/assign`, {
+        method: 'PATCH',
+        body: { rider_id: riderId },
+      })
+      check(
+        'admin assigns the order to a rider',
+        assigned.status === 200 && assigned.json?.order?.rider_id === riderId,
+        `${assigned.status} ${assigned.json?.error ?? ''}`,
+      )
+
+      const riderList = await rider.call('/api/rider/orders')
+      const mine = (riderList.json?.orders ?? []).find((row) => row.id === orderId)
+      check('rider sees the delivery assigned to them', mine?.order_status === 'ready', `${riderList.status}`)
+      check('rider panel reports assignment as enabled', riderList.json?.riderAssignmentReady === true)
+
+      const STRANGER_EMAIL = `qa.rider2.${stamp}@example.com`
+      const stranger = makeClient()
+      const strangerReg = await stranger.call('/api/auth/register', {
+        method: 'POST',
+        body: { email: STRANGER_EMAIL, password: PASSWORD, full_name: 'Other Rider', phone: '9876543216', role: 'rider' },
+      })
+      if (strangerReg.json?.user?.id) created.users.push(strangerReg.json.user.id)
+      await stranger.call('/api/auth/login', { method: 'POST', body: { email: STRANGER_EMAIL, password: PASSWORD } })
+
+      const strangerList = await stranger.call('/api/rider/orders')
+      check(
+        'another rider cannot see that delivery',
+        !(strangerList.json?.orders ?? []).some((row) => row.id === orderId),
+        `${strangerList.status}`,
+      )
+      const strangerUpdate = await stranger.call(`/api/rider/orders/${orderId}/status`, {
+        method: 'PATCH',
+        body: { status: 'out_for_delivery' },
+      })
+      check('another rider cannot update that delivery', strangerUpdate.status === 404, `${strangerUpdate.status}`)
+
+      const pickup = await rider.call(`/api/rider/orders/${orderId}/status`, {
+        method: 'PATCH',
+        body: { status: 'out_for_delivery' },
+      })
+      check(
+        'rider starts the delivery',
+        pickup.status === 200 && pickup.json?.order?.order_status === 'out_for_delivery',
+        `${pickup.status} ${pickup.json?.error ?? ''}`,
+      )
+
+      const delivered = await rider.call(`/api/rider/orders/${orderId}/status`, {
+        method: 'PATCH',
+        body: { status: 'delivered' },
+      })
+      check(
+        'rider marks the order delivered',
+        delivered.status === 200 && delivered.json?.order?.order_status === 'delivered',
+        `${delivered.status}`,
+      )
+
+      const customerView = await customer.call(`/api/orders/${orderId}`)
+      check(
+        'customer sees the delivered status',
+        customerView.json?.order?.order_status === 'delivered',
+        `${customerView.status}`,
+      )
+
+      const overview = await admin.call('/api/admin/overview')
+      check('admin overview reports rider assignment enabled', overview.json?.riderAssignmentReady === true)
+    }
   } finally {
     await cleanup()
     server.kill('SIGTERM')
