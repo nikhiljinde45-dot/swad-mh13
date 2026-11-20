@@ -421,8 +421,9 @@ async function orderRows(orders) {
     // dish name and price are resolved from menu_items for display.
     order_items: (order.order_items ?? []).map((item) => {
       const dish = dishById.get(item.menu_item_id) ?? {}
-      const price = item.price ?? dish.price ?? 0
-      return { ...item, name: item.name ?? dish.name ?? 'Item', price, unit_price: price }
+      const price = item.unit_price ?? item.price ?? dish.price ?? 0
+      const name = item.item_name ?? item.name ?? dish.name ?? 'Item'
+      return { ...item, name, price, unit_price: price, item_name: name }
     }),
   }))
 }
@@ -583,6 +584,8 @@ app.post('/api/orders', requireAuth('customer', 'admin'), wrap(async (req, res) 
           quantity: line.quantity,
           name: line.item_name,
           price: line.unit_price,
+          item_name: line.item_name,
+          unit_price: line.unit_price,
         },
         itemCols,
       ),

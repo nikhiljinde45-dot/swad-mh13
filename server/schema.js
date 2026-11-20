@@ -67,4 +67,12 @@ export const ADDRESS_COLUMNS = [
   'user_id', 'full_address', 'city', 'pincode', 'label', 'landmark', 'phone', 'is_default',
 ]
 
-export const ORDER_ITEM_COLUMNS = ['order_id', 'menu_item_id', 'quantity', 'name', 'price']
+export const ORDER_ITEM_COLUMNS = [
+  'order_id',
+  'menu_item_id',
+  'quantity',
+  'name',
+  'price',
+  'item_name',
+  'unit_price',
+]
