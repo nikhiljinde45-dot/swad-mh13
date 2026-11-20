@@ -196,7 +196,12 @@ function upiPaymentString(order, settings) {
 }
 
 app.get('/api/payments/config', wrap(async (_req, res) => {
-  res.json({ ...paymentSettings(), methods: PAYMENT_METHODS })
+  const settings = paymentSettings()
+  res.json({
+    ...settings,
+    // Never advertise a method the server would reject.
+    methods: PAYMENT_METHODS.filter((method) => settings.online_enabled || !method.online),
+  })
 }))
 
 app.get('/api/categories', wrap(async (_req, res) => {
