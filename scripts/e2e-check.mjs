@@ -227,7 +227,7 @@ async function main() {
     check('owner can edit price and availability', edited.status === 200 && Number(edited.json?.item?.price) === 150)
 
     const menu = await owner.call('/api/owner/menu')
-    check('owner menu lists the new item', (menu.json?.items ?? []).some((row) => row.id === itemId))
+    check('owner menu lists the new item', (menu.json?.menu ?? []).some((row) => row.id === itemId))
 
     const otherOwner = makeClient()
     const otherReg = await otherOwner.call('/api/auth/register', {
