@@ -10,7 +10,14 @@ import assert from 'node:assert/strict'
 let caseId = 0
 
 async function load(env) {
-  for (const key of ['SUPABASE_URL', 'SUPABASE_PROJECT_REF', 'SUPABASE_ANON_KEY', 'SUPABASE_SERVICE_ROLE_KEY']) {
+  for (const key of [
+    'SUPABASE_URL',
+    'SUPABASE_PROJECT_REF',
+    'SUPABASE_SECRET_KEY',
+    'SUPABASE_SERVICE_ROLE_KEY',
+    'SUPABASE_ANON_KEY',
+    'SUPABASE_PUBLISHABLE_KEY',
+  ]) {
     delete process.env[key]
   }
   Object.assign(process.env, env)

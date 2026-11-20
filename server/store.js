@@ -46,11 +46,23 @@ export function resolveSupabaseUrl() {
 }
 
 const SUPABASE_URL = resolveSupabaseUrl()
+// Supabase key precedence. The newer names (sb_secret_… / sb_publishable_…)
+// replace the legacy service_role / anon keys and are supported here too.
+// Every one of these is read on the server only — never bundled for the browser.
 const SUPABASE_KEY = (
+  process.env.SUPABASE_SECRET_KEY ||
   process.env.SUPABASE_SERVICE_ROLE_KEY ||
   process.env.SUPABASE_ANON_KEY ||
+  process.env.SUPABASE_PUBLISHABLE_KEY ||
   ''
 ).trim()
+
+const KEY_KIND =
+  process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY
+    ? 'secret'
+    : SUPABASE_KEY
+      ? 'publishable'
+      : 'none'
 const SUPABASE_HOST = SUPABASE_URL ? new URL(SUPABASE_URL).hostname : ''
 
 export const status = {
@@ -59,7 +71,10 @@ export const status = {
   supabaseHost: SUPABASE_HOST || null,
   supabaseConfigured: Boolean(SUPABASE_URL && SUPABASE_KEY),
   missingKey: Boolean(SUPABASE_URL && !SUPABASE_KEY),
-  hasServiceRole: Boolean(process.env.SUPABASE_SERVICE_ROLE_KEY),
+  hasServiceRole: Boolean(
+    process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY
+  ),
+  keyKind: KEY_KIND,
   mode: 'demo',
   warning: null,
 }

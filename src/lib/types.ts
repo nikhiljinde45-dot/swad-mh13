@@ -110,6 +110,7 @@ export interface AppConfig {
   supabase_url?: string | null
   supabase_configured: boolean
   supabase_key_missing?: boolean
+  supabase_key_kind?: 'secret' | 'publishable' | 'none'
   warning: string | null
   statuses: OrderStatus[]
   flow: OrderStatus[]
