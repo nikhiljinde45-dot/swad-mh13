@@ -268,6 +268,10 @@ async function main() {
   } finally {
     await cleanup()
     server.kill('SIGTERM')
+    if (failures > 0) {
+      console.log('\n--- server log ---')
+      console.log(serverLog.join('').slice(-3000) || '(empty)')
+    }
   }
 
   console.log(`\n${results.length - failures}/${results.length} checks passed`)
