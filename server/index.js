@@ -691,6 +691,16 @@ app.get('/api/owner/menu', requireAuth('restaurant_owner', 'admin'), wrap(async 
   res.json({ menu: data ?? [] })
 }))
 
+/**
+ * Columns PostgREST should return for a menu row. The live table may not have
+ * every optional column (is_veg, for example), so the list is discovered first
+ * instead of hardcoding a select that would fail on the existing database.
+ */
+async function menuReturnColumns() {
+  const cols = await availableColumns('menu_items', MENU_COLUMNS)
+  return ['id', ...cols].join(', ')
+}
+
 function menuPayload(body) {
   const payload = {
     name: requireText(body.name, 'Item name', { min: 2, max: 120 }),
@@ -953,6 +963,9 @@ app.patch('/api/admin/orders/:id/assign', requireAuth('admin'), wrap(async (req,
   if (!rider || rider.role !== 'rider') fail(400, 'That account is not a rider')
 
   const orderCols = await availableColumns('orders', ORDER_COLUMNS)
+  if (!orderCols.includes('rider_id')) {
+    fail(409, 'Rider assignment needs the orders.rider_id column. Run the SQL in supabase/migrations first.')
+  }
   const { data, error } = await sb
     .from('orders')
     .update(pick({ rider_id: riderId, updated_at: new Date().toISOString() }, orderCols))
