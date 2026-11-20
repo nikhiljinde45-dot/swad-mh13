@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { AppShell } from '../components/AppShell'
 import { Alert, Button, Card, Field, Input, Spinner, TextArea, cx } from '../components/kit'
-import { ApiError, api } from '../lib/api'
+import { ApiError, api, type PaymentsConfig } from '../lib/api'
 import { useAuth } from '../lib/auth'
 import { useCart } from '../lib/cart'
 import { inr } from '../lib/format'
@@ -18,7 +18,8 @@ export default function CheckoutPage() {
   const [adding, setAdding] = useState(false)
   const [form, setForm] = useState({ full_address: '', city: '', pincode: '' })
   const [notes, setNotes] = useState('')
-  const [payment, setPayment] = useState<'cod' | 'upi'>('cod')
+  const [payment, setPayment] = useState<'cod' | 'upi' | 'online'>('cod')
+  const [payments, setPayments] = useState<PaymentsConfig | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
@@ -27,8 +28,7 @@ export default function CheckoutPage() {
     if (!user || role !== 'customer') {
       setLoading(false)
       return
-    }
-    api
+    }    api
       .addresses()
       .then((result) => {
         setAddresses(result.addresses)
@@ -38,6 +38,16 @@ export default function CheckoutPage() {
       .catch((cause) => setError(cause instanceof ApiError ? cause.message : 'Could not load addresses.'))
       .finally(() => setLoading(false))
   }, [user, role])
+
+  useEffect(() => {
+    api
+      .paymentConfig()
+      .then((result) => {
+        setPayments(result)
+        if (!result.online_enabled) setPayment((current) => (current === 'online' ? 'cod' : current))
+      })
+      .catch(() => setPayments(null))
+  }, [])
 
   const saveAddress = async () => {
     setError(null)
@@ -93,7 +103,11 @@ export default function CheckoutPage() {
         notes: notes.trim() || undefined,
       })
       cart.clear()
-      navigate(`/orders?placed=${result.order.id}`, { replace: true })
+      const destination =
+        result.order.payment_method === 'online'
+          ? `/orders?pay=${result.order.id}`
+          : `/orders?placed=${result.order.id}`
+      navigate(destination, { replace: true })
     } catch (cause) {
       setError(cause instanceof ApiError ? cause.message : 'Could not place the order.')
     } finally {
@@ -233,12 +247,38 @@ export default function CheckoutPage() {
                   </button>
                 ))}
               </div>
+              {payments?.online_enabled && (
+                <button
+                  type="button"
+                  onClick={() => setPayment('online')}
+                  className={cx(
+                    'w-full rounded-xl px-3 py-2.5 text-sm font-bold ring-1',
+                    payment === 'online'
+                      ? 'bg-slate-900 text-white ring-slate-900'
+                      : 'bg-white text-slate-700 ring-slate-200',
+                  )}
+                >
+                  Pay online now (UPI QR)
+                </button>
+              )}
               <div className="rounded-xl bg-slate-50 p-2.5 text-[11px] leading-relaxed text-slate-500">
-                <span className="font-bold text-slate-700">
-                  Pay online (UPI / card) — not enabled yet.
-                </span>{' '}
-                You pay the rider on delivery by cash or UPI. Card and online UPI open up once a
-                payment provider is connected.
+                {payment === 'online' ? (
+                  <>
+                    <span className="font-bold text-slate-700">Pay by UPI right after placing the order.</span>{' '}
+                    A QR for the exact amount opens next — scan it with any UPI app and the order goes to
+                    the kitchen straight away.
+                  </>
+                ) : (
+                  <>
+                    <span className="font-bold text-slate-700">
+                      Pay the rider on delivery
+                    </span>{' '}
+                    by cash or UPI.{' '}
+                    {payments?.online_enabled
+                      ? 'You can also choose “Pay online now” to settle by UPI QR immediately.'
+                      : 'Online payment is not set up yet, so the QR option is hidden.'}
+                  </>
+                )}
               </div>
               <Field label="Notes for the kitchen" hint="Optional">
                 <Input
