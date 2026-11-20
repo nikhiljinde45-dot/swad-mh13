@@ -1,127 +1,153 @@
+import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
+import { AppShell } from '../components/AppShell'
+import { Alert, Button, Card, EmptyState, QtyStepper, Spinner, Thumb } from '../components/kit'
+import { ApiError, api } from '../lib/api'
+import { useAuth } from '../lib/auth'
+import { useCart } from '../lib/cart'
 import { inr } from '../lib/format'
-import { useCart } from '../lib/app-state'
-import { Button, EmptyState, FoodThumb, Icon, QtyStepper, SectionTitle } from '../components/ui'
+import type { Restaurant } from '../lib/types'
 
 export default function CartPage() {
-  const { cart, count, subtotal, total, increment, decrement, clear } = useCart()
+  const { user, role } = useAuth()
+  const cart = useCart()
   const navigate = useNavigate()
+  const [restaurant, setRestaurant] = useState<Restaurant | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [loading, setLoading] = useState(Boolean(cart.restaurantId))
 
-  if (!cart.lines.length) {
+  useEffect(() => {
+    if (!cart.restaurantId) {
+      setLoading(false)
+      return
+    }
+    const controller = new AbortController()
+    api
+      .restaurant(cart.restaurantId, controller.signal)
+      .then((result) => setRestaurant(result.restaurant))
+      .catch((cause) => {
+        if (controller.signal.aborted) return
+        setError(cause instanceof ApiError ? cause.message : 'Could not load the restaurant.')
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setLoading(false)
+      })
+    return () => controller.abort()
+  }, [cart.restaurantId])
+
+  const deliveryFee = Number(restaurant?.delivery_fee ?? 0)
+  const total = cart.subtotal + deliveryFee
+  const blocked = role && role !== 'customer'
+
+  if (!user) {
     return (
-      <div className="px-4 py-8">
-        <h1 className="mb-4 text-xl font-extrabold text-ink-900">Your cart</h1>
+      <AppShell>
         <EmptyState
-          emoji="🛒"
-          title="Your cart is empty"
-          body="Add a misal, thali or biryani from a nearby kitchen to get started."
+          title="Sign in to view your cart"
+          message="Your cart is saved on this device."
           action={
-            <Link to="/" className="rounded-xl bg-brand-500 px-4 py-2.5 text-sm font-semibold text-white">
-              Browse restaurants
+            <Link to="/login">
+              <Button>Sign in</Button>
             </Link>
           }
         />
-      </div>
+      </AppShell>
     )
   }
 
   return (
-    <div className="pb-40">
-      <div className="sticky top-0 z-20 border-b border-ink-300/60 bg-cream/95 px-4 py-3 backdrop-blur pt-safe">
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-lg font-extrabold leading-tight text-ink-900">Your cart</h1>
-            <p className="text-[11px] font-medium text-ink-500">{cart.restaurantName}</p>
-          </div>
-          <button
-            type="button"
-            onClick={clear}
-            className="rounded-lg px-2.5 py-1.5 text-[11px] font-semibold text-rose-600 hover:bg-rose-50"
-          >
-            Clear cart
-          </button>
+    <AppShell>
+      <div className="space-y-4">
+        <div>
+          <h1 className="text-xl font-extrabold text-slate-900">Your cart</h1>
+          {cart.restaurantName && (
+            <p className="text-sm text-slate-500">from {cart.restaurantName}</p>
+          )}
         </div>
-      </div>
 
-      <div className="px-4 pt-3">
-        <div className="rounded-2xl bg-white px-3 shadow-card ring-1 ring-black/5">
-          {cart.lines.map(({ item, qty }) => (
-            <div
-              key={item.id}
-              className="flex items-center gap-3 border-b border-ink-300/40 py-3 last:border-b-0"
+        {blocked && <Alert tone="warning">Only customer accounts can place orders.</Alert>}
+        {error && <Alert tone="error">{error}</Alert>}
+        {restaurant && !restaurant.is_active && (
+          <Alert tone="warning">
+            This restaurant is not accepting orders right now. You can keep your cart for later.
+          </Alert>
+        )}
+
+        {loading ? (
+          <Spinner />
+        ) : cart.lines.length === 0 ? (
+          <EmptyState
+            title="Your cart is empty"
+            message="Browse restaurants and add something tasty."
+            action={
+              <Link to="/">
+                <Button>Browse restaurants</Button>
+              </Link>
+            }
+          />
+        ) : (
+          <>
+            <div className="space-y-2">
+              {cart.lines.map((line) => (
+                <Card key={line.menu_item_id} className="flex items-center gap-3">
+                  <Thumb src={line.image_url} alt={line.name} className="h-14 w-14 rounded-xl" />
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-bold text-slate-900">{line.name}</p>
+                    <p className="text-xs text-slate-500">{inr(line.price)} each</p>
+                    <p className="text-sm font-extrabold text-slate-900">
+                      {inr(line.price * line.quantity)}
+                    </p>
+                  </div>
+                  <div className="flex flex-col items-end gap-1">
+                    <QtyStepper
+                      value={line.quantity}
+                      onChange={(next) => cart.setQuantity(line.menu_item_id, next)}
+                      min={1}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => cart.remove(line.menu_item_id)}
+                      className="text-[11px] font-bold text-rose-600 hover:underline"
+                    >
+                      Remove
+                    </button>
+                  </div>
+                </Card>
+              ))}
+            </div>
+
+            <Card className="space-y-1.5">
+              <div className="flex justify-between text-sm text-slate-600">
+                <span>Item total</span>
+                <span>{inr(cart.subtotal)}</span>
+              </div>
+              <div className="flex justify-between text-sm text-slate-600">
+                <span>Delivery fee</span>
+                <span>{deliveryFee ? inr(deliveryFee) : 'Free'}</span>
+              </div>
+              <div className="flex justify-between border-t border-dashed border-slate-200 pt-1.5 text-base font-extrabold text-slate-900">
+                <span>To pay</span>
+                <span>{inr(total)}</span>
+              </div>
+              <p className="pt-1 text-[11px] text-slate-400">
+                Final amounts are recalculated on the server before your order is created.
+              </p>
+            </Card>
+
+            <Button full disabled={Boolean(blocked)} onClick={() => navigate('/checkout')}>
+              Proceed to checkout
+            </Button>
+
+            <button
+              type="button"
+              onClick={() => cart.clear()}
+              className="w-full text-center text-xs font-semibold text-slate-500 hover:text-rose-600"
             >
-              <FoodThumb
-                emoji={item.emoji}
-                seed={item.name}
-                imageUrl={item.image_url}
-                className="h-12 w-12"
-                emojiClass="text-xl"
-                rounded="rounded-xl"
-              />
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-sm font-semibold text-ink-900">{item.name}</p>
-                <p className="text-[11px] text-ink-500">{inr(item.price)} each</p>
-              </div>
-              <div className="flex flex-col items-end gap-1">
-                <QtyStepper
-                  qty={qty}
-                  onInc={() => increment(item.id)}
-                  onDec={() => decrement(item.id)}
-                  label={item.name}
-                />
-                <p className="text-xs font-bold text-ink-900">{inr(item.price * qty)}</p>
-              </div>
-            </div>
-          ))}
-        </div>
-
-        <Link
-          to="/"
-          className="mt-3 inline-flex items-center gap-1.5 text-xs font-semibold text-brand-700"
-        >
-          <Icon.Plus className="h-3.5 w-3.5" /> Add more items
-        </Link>
-
-        <section className="mt-5">
-          <SectionTitle>Bill details</SectionTitle>
-          <div className="space-y-2 rounded-2xl bg-white p-4 text-sm shadow-card ring-1 ring-black/5">
-            <div className="flex justify-between text-ink-700">
-              <span>Item total</span>
-              <span className="font-semibold">{inr(subtotal)}</span>
-            </div>
-            <div className="flex justify-between text-ink-700">
-              <span>Delivery fee</span>
-              <span className="font-semibold">
-                {cart.deliveryFee === 0 ? (
-                  <span className="text-emerald-600">FREE</span>
-                ) : (
-                  inr(cart.deliveryFee)
-                )}
-              </span>
-            </div>
-            <div className="flex justify-between text-ink-700">
-              <span>Taxes &amp; charges</span>
-              <span className="font-semibold text-emerald-600">Included</span>
-            </div>
-            <div className="mt-1 flex justify-between border-t border-dashed border-ink-300 pt-2.5 text-base font-extrabold text-ink-900">
-              <span>To pay</span>
-              <span>{inr(total)}</span>
-            </div>
-          </div>
-        </section>
-
-        <p className="mt-3 rounded-xl bg-brand-50 px-3 py-2 text-[11px] font-medium text-brand-800">
-          Pay by cash on delivery or UPI. No card details are ever stored.
-        </p>
+              Clear cart
+            </button>
+          </>
+        )}
       </div>
-
-      <div className="fixed inset-x-0 bottom-16 z-30 px-3">
-        <div className="mx-auto w-full max-w-lg">
-          <Button full size="lg" onClick={() => navigate('/checkout')} className="shadow-float">
-            Checkout • {inr(total)} ({count})
-          </Button>
-        </div>
-      </div>
-    </div>
+    </AppShell>
   )
 }
