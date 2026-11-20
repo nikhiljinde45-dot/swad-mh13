@@ -1,97 +1,210 @@
 import type {
-  AdminStats,
+  Address,
+  AdminOverview,
   AppConfig,
-  CheckoutPayload,
-  Customer,
+  Category,
   MenuItem,
   Order,
   OrderStatus,
+  Profile,
   Restaurant,
-  Rider,
-  RiderStatus,
+  Role,
+  User,
 } from './types'
 
-async function parse<T>(res: Response): Promise<T> {
-  const text = await res.text()
-  let data: unknown = {}
-  try {
-    data = text ? JSON.parse(text) : {}
-  } catch {
-    throw new Error(`Unexpected server response (${res.status})`)
+export class ApiError extends Error {
+  status: number
+
+  constructor(message: string, status: number) {
+    super(message)
+    this.name = 'ApiError'
+    this.status = status
   }
-  if (!res.ok) {
-    const message = (data as { error?: string })?.error || `Request failed (${res.status})`
-    throw new Error(message)
-  }
-  return data as T
 }
 
-const get = <T>(url: string) => fetch(url, { headers: { Accept: 'application/json' } }).then((r) => parse<T>(r))
+type RequestOptions = { method?: string; body?: unknown; signal?: AbortSignal }
 
-const send = <T>(url: string, method: string, body?: unknown) =>
-  fetch(url, {
-    method,
-    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-    body: body === undefined ? undefined : JSON.stringify(body),
-  }).then((r) => parse<T>(r))
-
-const qs = (params: Record<string, string | undefined>) => {
-  const search = new URLSearchParams()
-  for (const [key, value] of Object.entries(params)) {
-    if (value) search.set(key, value)
+async function request<T>(path: string, { method = 'GET', body, signal }: RequestOptions = {}): Promise<T> {
+  let response: Response
+  try {
+    response = await fetch(path, {
+      method,
+      signal,
+      credentials: 'same-origin',
+      headers: body === undefined ? undefined : { 'Content-Type': 'application/json' },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    })
+  } catch (error) {
+    if ((error as Error).name === 'AbortError') throw error
+    throw new ApiError('Cannot reach the server. Check your connection and try again.', 0)
   }
-  const s = search.toString()
-  return s ? `?${s}` : ''
+
+  const text = await response.text()
+  let payload: unknown = null
+  if (text) {
+    try {
+      payload = JSON.parse(text)
+    } catch {
+      payload = null
+    }
+  }
+
+  if (!response.ok) {
+    const message =
+      (payload as { error?: string } | null)?.error || `Request failed (${response.status})`
+    throw new ApiError(message, response.status)
+  }
+
+  return payload as T
+}
+
+export interface RegisterPayload {
+  email: string
+  password: string
+  full_name: string
+  phone: string
+  role: 'customer' | 'owner' | 'rider'
+  restaurant?: {
+    name: string
+    description?: string
+    address: string
+    city: string
+    pincode: string
+    image_url?: string | null
+  }
+}
+
+export interface AuthResult {
+  user: User
+  profile: Profile
+  restaurant?: Restaurant | null
+}
+
+export interface MenuItemInput {
+  name: string
+  description?: string
+  price: number
+  category_id?: string | null
+  image_url?: string | null
+  is_available?: boolean
+  is_veg?: boolean
 }
 
 export const api = {
-  config: () => get<AppConfig>('/api/config'),
+  config: () => request<AppConfig>('/api/config'),
 
-  restaurants: (category?: string) =>
-    get<{ source: string; restaurants: Restaurant[] }>(`/api/restaurants${qs({ category })}`),
+  me: () => request<{ user: User | null; profile: Profile | null }>('/api/auth/me'),
+  login: (email: string, password: string) =>
+    request<AuthResult>('/api/auth/login', { method: 'POST', body: { email, password } }),
+  register: (payload: RegisterPayload) =>
+    request<AuthResult>('/api/auth/register', { method: 'POST', body: payload }),
+  logout: () => request<{ ok: boolean }>('/api/auth/logout', { method: 'POST' }),
+  forgotPassword: (email: string) =>
+    request<{ ok: boolean; message: string }>('/api/auth/forgot-password', {
+      method: 'POST',
+      body: { email },
+    }),
+  changePassword: (password: string) =>
+    request<{ ok: boolean }>('/api/auth/password', { method: 'POST', body: { password } }),
 
-  restaurant: (id: string) =>
-    get<{ restaurant: Restaurant; menu: MenuItem[] }>(`/api/restaurants/${encodeURIComponent(id)}`),
+  categories: () => request<{ categories: Category[] }>('/api/categories'),
+  restaurants: (params: { search?: string; category?: string } = {}) => {
+    const query = new URLSearchParams()
+    if (params.search) query.set('search', params.search)
+    if (params.category) query.set('category', params.category)
+    const suffix = query.toString()
+    return request<{ restaurants: Restaurant[] }>(`/api/restaurants${suffix ? `?${suffix}` : ''}`)
+  },
+  restaurant: (id: string, signal?: AbortSignal) =>
+    request<{ restaurant: Restaurant; menu: MenuItem[] }>(`/api/restaurants/${id}`, { signal }),
 
-  updateRestaurant: (id: string, patch: Partial<Restaurant>) =>
-    send<{ restaurant: Restaurant }>(`/api/restaurants/${encodeURIComponent(id)}`, 'PATCH', patch),
+  addresses: () => request<{ addresses: Address[] }>('/api/addresses'),
+  createAddress: (payload: { full_address: string; city: string; pincode: string }) =>
+    request<{ address: Address }>('/api/addresses', { method: 'POST', body: payload }),
+  deleteAddress: (id: string) =>
+    request<{ ok: boolean }>(`/api/addresses/${id}`, { method: 'DELETE' }),
 
-  createMenuItem: (payload: Partial<MenuItem> & { restaurant_id: string }) =>
-    send<{ item: MenuItem }>('/api/menu-items', 'POST', payload),
+  placeOrder: (payload: {
+    restaurant_id: string
+    items: { menu_item_id: string; quantity: number }[]
+    address_id?: string
+    full_address?: string
+    city?: string
+    pincode?: string
+    payment_method?: 'cod' | 'upi'
+    notes?: string
+  }) => request<{ order: Order }>('/api/orders', { method: 'POST', body: payload }),
+  orders: () => request<{ orders: Order[] }>('/api/orders'),
+  order: (id: string) => request<{ order: Order }>(`/api/orders/${id}`),
 
-  updateMenuItem: (id: string, patch: Partial<MenuItem>) =>
-    send<{ item: MenuItem }>(`/api/menu-items/${encodeURIComponent(id)}`, 'PATCH', patch),
+  upload: (dataUrl: string, filename: string) =>
+    request<{ url: string; path: string }>('/api/uploads', {
+      method: 'POST',
+      body: { dataUrl, filename },
+    }),
 
-  deleteMenuItem: (id: string) =>
-    send<{ id: string; deleted: boolean }>(`/api/menu-items/${encodeURIComponent(id)}`, 'DELETE'),
+  owner: {
+    restaurant: () =>
+      request<{ restaurant: Restaurant | null; menu: MenuItem[]; categories: Category[] }>(
+        '/api/owner/restaurant',
+      ),
+    createRestaurant: (payload: {
+      name: string
+      description?: string
+      address: string
+      city: string
+      pincode: string
+      owner_name?: string
+      owner_phone?: string
+      image_url?: string | null
+    }) => request<{ restaurant: Restaurant }>('/api/owner/restaurant', { method: 'POST', body: payload }),
+    updateRestaurant: (payload: Partial<Restaurant>) =>
+      request<{ restaurant: Restaurant }>('/api/owner/restaurant', { method: 'PATCH', body: payload }),
+    addMenuItem: (payload: MenuItemInput) =>
+      request<{ item: MenuItem }>('/api/owner/menu-items', { method: 'POST', body: payload }),
+    updateMenuItem: (id: string, payload: Partial<MenuItemInput>) =>
+      request<{ item: MenuItem }>(`/api/owner/menu-items/${id}`, { method: 'PATCH', body: payload }),
+    deleteMenuItem: (id: string) =>
+      request<{ ok: boolean; id: string }>(`/api/owner/menu-items/${id}`, { method: 'DELETE' }),
+    orders: () => request<{ orders: Order[] }>('/api/owner/orders'),
+    setOrderStatus: (id: string, status: OrderStatus) =>
+      request<{ order: Order }>(`/api/owner/orders/${id}/status`, {
+        method: 'PATCH',
+        body: { status },
+      }),
+  },
 
-  orders: (params: { customer_id?: string; restaurant_id?: string; rider_id?: string; status?: string } = {}) =>
-    get<{ source: string; orders: Order[] }>(`/api/orders${qs(params)}`),
+  rider: {
+    orders: () => request<{ orders: Order[] }>('/api/rider/orders'),
+    setStatus: (id: string, status: OrderStatus) =>
+      request<{ order: Order }>(`/api/rider/orders/${id}/status`, {
+        method: 'PATCH',
+        body: { status },
+      }),
+  },
 
-  order: (id: string) => get<{ order: Order }>(`/api/orders/${encodeURIComponent(id)}`),
-
-  createOrder: (payload: CheckoutPayload) => send<{ order: Order }>('/api/orders', 'POST', payload),
-
-  updateOrder: (id: string, patch: { status?: OrderStatus; rider_id?: string | null }) =>
-    send<{ order: Order }>(`/api/orders/${encodeURIComponent(id)}`, 'PATCH', patch),
-
-  riders: () => get<{ riders: Rider[] }>('/api/riders'),
-
-  createRider: (payload: Partial<Rider>) => send<{ rider: Rider }>('/api/riders', 'POST', payload),
-
-  updateRider: (id: string, patch: { status?: RiderStatus; name?: string; phone?: string; area?: string; vehicle?: string }) =>
-    send<{ rider: Rider }>(`/api/riders/${encodeURIComponent(id)}`, 'PATCH', patch),
-
-  deleteRider: (id: string) =>
-    send<{ id: string; deleted: boolean }>(`/api/riders/${encodeURIComponent(id)}`, 'DELETE'),
-
-  customers: () => get<{ customers: Customer[] }>('/api/customers'),
-
-  updateCustomer: (id: string, patch: { is_blocked?: boolean; name?: string; address?: string }) =>
-    send<{ customer: Customer }>(`/api/customers/${encodeURIComponent(id)}`, 'PATCH', patch),
-
-  deleteCustomer: (id: string) =>
-    send<{ id: string; deleted: boolean }>(`/api/customers/${encodeURIComponent(id)}`, 'DELETE'),
-
-  stats: () => get<{ stats: AdminStats }>('/api/admin/stats'),
+  admin: {
+    overview: () => request<AdminOverview>('/api/admin/overview'),
+    setRestaurantActive: (id: string, isActive: boolean, rejectionReason?: string) =>
+      request<{ restaurant: Restaurant }>(`/api/admin/restaurants/${id}`, {
+        method: 'PATCH',
+        body: { is_active: isActive, rejection_reason: rejectionReason ?? null },
+      }),
+    setProfile: (id: string, patch: { role?: Role; is_blocked?: boolean }) =>
+      request<{ profile: Profile }>(`/api/admin/profiles/${id}`, { method: 'PATCH', body: patch }),
+    assignRider: (orderId: string, riderId: string) =>
+      request<{ order: Order }>(`/api/admin/orders/${orderId}/assign`, {
+        method: 'PATCH',
+        body: { rider_id: riderId },
+      }),
+    addCategory: (name: string) =>
+      request<{ category: Category }>('/api/admin/categories', { method: 'POST', body: { name } }),
+    updateCategory: (id: string, name: string) =>
+      request<{ category: Category }>(`/api/admin/categories/${id}`, {
+        method: 'PATCH',
+        body: { name },
+      }),
+    deleteCategory: (id: string) =>
+      request<{ ok: boolean }>(`/api/admin/categories/${id}`, { method: 'DELETE' }),
+  },
 }

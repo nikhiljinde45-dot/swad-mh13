@@ -1,3 +1,5 @@
+export type Role = 'customer' | 'owner' | 'rider' | 'admin'
+
 export type OrderStatus =
   | 'placed'
   | 'accepted'
@@ -6,144 +8,136 @@ export type OrderStatus =
   | 'out_for_delivery'
   | 'delivered'
   | 'cancelled'
+  | 'rejected'
 
-export type RiderStatus = 'online' | 'busy' | 'offline'
-
-export interface Restaurant {
+export interface User {
   id: string
-  name: string
-  cuisine: string
-  area: string
-  category: string
-  rating: number
-  rating_count: number
-  delivery_minutes: number
-  delivery_fee: number
-  min_order: number
-  price_for_two: number
-  is_open: boolean
-  is_verified: boolean
-  accent: string
-  emoji: string
-  tagline: string
-  phone: string
-  image_url: string | null
-}
-
-export interface MenuItem {
-  id: string
-  restaurant_id: string
-  name: string
-  description: string
-  price: number
-  category: string
-  is_veg: boolean
-  is_available: boolean
-  is_bestseller: boolean
-  emoji: string
-  image_url: string | null
-}
-
-export interface OrderLine {
-  menu_item_id: string
-  name: string
-  price: number
-  qty: number
-  emoji: string
-}
-
-export interface Order {
-  id: string
-  code: string
-  customer_id: string
-  customer_name: string
-  phone: string
-  address: string
-  restaurant_id: string
-  restaurant_name: string
-  restaurant_area: string
-  items: OrderLine[]
-  subtotal: number
-  delivery_fee: number
-  total: number
-  status: OrderStatus
-  rider_id: string | null
-  rider_name: string | null
-  rider_phone: string | null
-  payment_method: 'cod' | 'upi'
-  notes: string
-  created_at: string
-  updated_at: string
-}
-
-export interface Rider {
-  id: string
-  name: string
-  phone: string
-  area: string
-  vehicle: string
-  status: RiderStatus
-  deliveries: number
-  rating: number
-}
-
-export interface Customer {
-  id: string
-  name: string
-  phone: string
   email: string
-  address: string
-  orders: number
-  created_at: string
-  is_blocked: boolean
+  full_name: string
+  phone: string
+  role: Role
+}
+
+export interface Profile extends User {
+  is_blocked?: boolean
+  created_at?: string
 }
 
 export interface Category {
   id: string
   name: string
-  emoji: string
+  image_url?: string | null
+}
+
+export interface Restaurant {
+  id: string
+  owner_user_id?: string
+  name: string
+  description: string | null
+  image_url: string | null
+  address: string
+  city?: string | null
+  pincode?: string | null
+  owner_name?: string | null
+  owner_phone?: string | null
+  is_active: boolean
+  rejection_reason?: string | null
+  delivery_fee?: number | null
+  menu_count?: number
+  created_at?: string
+}
+
+export interface MenuItem {
+  id: string
+  restaurant_id: string
+  category_id: string | null
+  name: string
+  description: string | null
+  price: number
+  image_url: string | null
+  is_available: boolean
+  is_veg?: boolean
+  categories?: { name: string } | null
+}
+
+export interface Address {
+  id: string
+  user_id: string
+  full_address: string
+  city: string
+  pincode: string
+  created_at?: string
+}
+
+export interface OrderItem {
+  id?: string
+  order_id?: string
+  menu_item_id: string | null
+  item_name: string
+  quantity: number
+  unit_price: number
+}
+
+export interface Order {
+  id: string
+  user_id: string
+  restaurant_id: string
+  address_id: string | null
+  total_amount: number
+  subtotal?: number | null
+  delivery_fee?: number | null
+  order_status: OrderStatus
+  payment_status?: string | null
+  payment_method?: string | null
+  delivery_address?: string | null
+  notes?: string | null
+  rider_id?: string | null
+  created_at: string
+  updated_at?: string | null
+  restaurants?: Pick<Restaurant, 'id' | 'name' | 'image_url' | 'address'> | null
+  order_items?: OrderItem[]
+  customer?: { id: string; full_name: string | null; phone: string | null } | null
+}
+
+export interface AdminOverview {
+  restaurants: Restaurant[]
+  pending: Restaurant[]
+  customers: Profile[]
+  riders: Profile[]
+  owners: Profile[]
+  admins: Profile[]
+  categories: Category[]
+  orders: Order[]
+  counts: {
+    restaurants: number
+    active_restaurants: number
+    pending: number
+    customers: number
+    riders: number
+    orders: number
+    revenue: number
+  }
+}
+
+export interface SetupReport {
+  ready: boolean
+  missing: string[]
 }
 
 export interface AppConfig {
   app: string
-  mode: 'supabase' | 'demo'
-  supabase_url?: string | null
+  supabase_url: string | null
   supabase_configured: boolean
-  supabase_key_missing?: boolean
-  supabase_key_kind?: 'secret' | 'publishable' | 'none'
-  missing_tables?: string[]
-  warning: string | null
+  storage_bucket: string
   statuses: OrderStatus[]
-  flow: OrderStatus[]
-  categories: Category[]
+  setup: SetupReport
 }
 
-export interface AdminStats {
-  restaurants: number
-  open_restaurants: number
-  riders: number
-  online_riders: number
-  customers: number
-  orders: number
-  active_orders: number
-  delivered_orders: number
-  revenue: number
-}
-
-export interface Profile {
-  id: string
+export interface CartLine {
+  menu_item_id: string
   name: string
-  phone: string
-  address: string
-}
-
-export interface CheckoutPayload {
-  customer_id?: string
-  customer_name: string
-  phone: string
-  address: string
-  restaurant_id: string
-  items: { menu_item_id: string; qty: number }[]
-  payment_method: 'cod' | 'upi'
-  notes?: string
+  price: number
+  quantity: number
+  image_url: string | null
+  is_veg?: boolean
 }
