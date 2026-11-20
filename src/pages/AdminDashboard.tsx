@@ -347,6 +347,13 @@ export default function AdminDashboard() {
 
         {tab === 'orders' && (
           <div className="space-y-3">
+            {data.riderAssignmentReady === false && (
+              <Alert tone="warning">
+                Rider assignment needs one database step. Run the SQL in
+                supabase/migrations/20261120000000_swad_mh13_auth.sql in your Supabase SQL editor;
+                it adds orders.rider_id. Riders cannot receive deliveries until then.
+              </Alert>
+            )}
             <p className="text-xs font-bold uppercase tracking-wide text-slate-500">
               Assign riders ({assignable.length} ready)
             </p>
