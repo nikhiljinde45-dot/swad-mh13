@@ -1,143 +1,168 @@
 # Swad MH13 🍲
 
-A mobile-first food delivery web app for Kolhapur / Gadhinglaj style food — misal, thali, biryani,
-tandoor and more. One codebase, four panels:
+Mobile-first food delivery web app for Kolhapur / Gadhinglaj style food — misal, thali, biryani,
+tandoor and more. One codebase, four panels, all reading and writing **your existing Supabase
+database** through a small Express server.
+
+**Live:** https://tzi5vty8qa.dev.ap-jt.com
 
 | Panel | Route | What it does |
 | --- | --- | --- |
-| **Customer** | `/` | Browse restaurants & categories, search, view menus, add to cart, checkout, track orders |
-| **Restaurant Owner** | `/owner` | Restaurant profile + cover photo, add/edit/delete dishes, upload food photos, change prices, availability, accept/prepare/ready orders |
-| **Rider** | `/rider` | Duty status, claim packed orders, see assigned deliveries, mark picked up / delivered |
-| **Admin** | `/admin` | Live stats, all orders, rider assignment, restaurants, riders, customers (block/delete) |
+| **Customer** | `/` | Browse restaurants & categories, search, menu, cart, address checkout, order history |
+| **Restaurant Owner** | `/owner` | Own restaurant only: profile + cover photo, add/edit/delete dishes, photos, prices, availability, accept/prepare/ready |
+| **Rider** | `/rider` | Assigned deliveries only, customer address, update status, mark delivered |
+| **Admin** | `/admin` | Approve/reject restaurants, manage restaurants, customers, riders, categories, orders, assign riders |
 
-Built with **React 19 + TypeScript + Tailwind CSS v4 (Vite)** and a small **Express 5** server that
-serves the built app and the JSON API.
+Built with **React 19 + TypeScript + Tailwind CSS v4 (Vite)** and **Express 5**, which serves the
+built client from `dist/` and the JSON API on the same port.
 
 ---
 
-## Quick start
+## 1. Environment variables
+
+Everything is read server-side only — no Supabase key ever reaches the browser bundle.
+
+| Name | Required | Notes |
+| --- | --- | --- |
+| `SUPABASE_URL` | yes | `https://<ref>.supabase.co` (a bare project ref also works) |
+| `SUPABASE_SECRET_KEY` | yes* | Secret key (`sb_secret_…`). Server-side only. |
+| `SUPABASE_SERVICE_ROLE_KEY` | yes* | Legacy name for the same value. *Provide at least one. |
+| `SUPABASE_PROJECT_REF` | no | Used when `SUPABASE_URL` is empty |
+| `PORT` | no | Defaults to `3000`; the server binds `0.0.0.0` |
+
+Set these in **AppJet → Settings → Environment variables** (or a local `.env`, see `.env.example`).
+`SUPABASE_ANON_KEY` / `SUPABASE_PUBLISHABLE_KEY` are optional and only used if you add
+browser-direct Supabase calls later.
+
+## 2. Quick start
 
 ```bash
 npm install
-npm run build     # typecheck + production build into dist/
+npm run build     # tsc --noEmit + vite build → dist/
 npm start         # serves dist/ and /api on http://localhost:3000
 ```
 
-For development with hot reload (Vite on :5173, proxying `/api` to :3000):
+## 3. Database
 
-```bash
-npm run server    # terminal 1 — API on :3000
-npm run dev       # terminal 2 — UI on :5173
+The app uses the **existing** tables, without creating duplicates: `profiles`, `restaurants`,
+`categories`, `menu_items`, `addresses`, `orders`, `order_items`.
+
+Because the live schema may not have every optional column, every query is built from the columns
+that actually exist (`server/schema.js`: `availableColumns()` + `pick()`), so the app runs on your
+current database instead of failing on a missing column.
+
+### Migration (optional, enables rider assignment)
+
+`supabase/migrations/20261120000000_swad_mh13_auth.sql` is additive and idempotent. It adds the
+columns/policies the rider workflow and stricter RLS need. The minimum for rider assignment:
+
+```sql
+alter table public.orders add column if not exists rider_id uuid references auth.users (id);
+create index if not exists orders_rider_id_idx on public.orders (rider_id);
 ```
 
-The app runs immediately **without any configuration** using built-in demo data
-(7 restaurants, ~45 dishes, riders, customers and sample orders). A small banner in the
-customer home page tells you which mode you are in.
+Run the whole file in **Supabase → SQL Editor** (or reconnect the Supabase integration in
+**Settings → Connect Supabase** and ask me to apply it). Until `orders.rider_id` exists:
 
----
+- the rider panel loads with an empty list and a notice,
+- admin rider assignment returns `409` with a message pointing at this migration,
+- everything else (customer, owner, admin) works normally.
 
-## Connecting your existing Supabase database
+### Admin access
 
-The project is already wired for Supabase; only two server-side values are needed.
+Admin is never self-selectable. Create the account through normal registration, then promote it in
+SQL:
 
-1. **Create the tables.** Open your Supabase project → **SQL Editor** → paste
-   [`supabase/schema.sql`](supabase/schema.sql) → **Run**. The file is idempotent.
-2. **Add the credentials** in AppJet → **Settings → Environment variables**:
-
-   | Variable | Where to find it | Notes |
-   | --- | --- | --- |
-   | `SUPABASE_URL` | Supabase → Project Settings → API → Project URL | e.g. `https://abcd1234.supabase.co`; a bare project ref such as `vppfluhgfkbamwngadcd` is also accepted and expanded to `https://<ref>.supabase.co` |
-   | `SUPABASE_PROJECT_REF` | The `<ref>` part of `supabase.com/dashboard/project/<ref>` | Optional; used only when `SUPABASE_URL` is empty |
-   | `SUPABASE_ANON_KEY` | Supabase → Project Settings → API → `anon` public key | Required |
-   | `SUPABASE_SERVICE_ROLE_KEY` | Same page, `service_role` secret | Optional; preferred on the server |
-
-3. **Redeploy / restart.** The server probes Supabase at boot:
-   - tables reachable → `mode: "supabase"` (all reads/writes go to your database),
-   - tables missing or unreachable → `mode: "demo"` with a warning in `/api/config`, so the app
-     never shows a blank screen.
-
-Check the live mode at any time: `GET /api/config` → `{"mode": "supabase", ...}`.
-
-### Are keys exposed to the browser?
-
-**No.** Only `PORT` and `VITE_*` variables reach the client bundle. `SUPABASE_*` is read exclusively
-in `server/store.js` via `process.env` and never imported into `src/`. The browser talks to
-`/api/*` on your own server. See `.env.example`.
-
-### Going to production
-
-The shipped RLS policies in `supabase/schema.sql` let the server's key read/write all rows — this
-matches the current demo sign-in where you pick an owner/rider/admin in the UI. Before opening the
-app to real customers:
-
-1. Add **Supabase Auth** (phone OTP works well for India) and store `auth.uid()` on rows
-   (`owner_id`, `rider_id`, `customer_id`).
-2. Replace the permissive policies with per-user rules, e.g. an owner may update only their own
-   restaurant and its menu items.
-3. Use `SUPABASE_SERVICE_ROLE_KEY` only in server code, never in a client bundle.
-4. Move food photos to **Supabase Storage** (free tier) instead of inline data URLs — the upload
-   helper is isolated in `src/lib/image.ts` and only needs to return a public URL.
-
----
-
-## Project structure
-
-```
-server/
-  index.js      Express API + static hosting of dist/ (SPA fallback)
-  store.js      Supabase client + in-memory demo store, status transitions, stats
-  seed.js       Demo catalogue (also seeds an empty Supabase project)
-src/
-  App.tsx       Routes for all four panels
-  lib/
-    api.ts      Typed fetch wrapper for /api/*
-    types.ts    Shared domain types
-    format.ts   ₹ formatting, status labels/colours, time helpers
-    app-state.tsx  Cart, saved profile and toasts (localStorage)
-    image.ts    On-device photo compression for menu/cover uploads
-  components/   ui.tsx (buttons, sheet, tabs, steppers…), layouts, cards
-  pages/        Home, RestaurantPage, CartPage, CheckoutPage, OrdersPage,
-                TrackPage, PanelsPage, OwnerPanel, RiderPanel, AdminPanel
-supabase/
-  schema.sql    Tables, indexes, RLS policies
+```sql
+update public.profiles set role = 'admin' where id = '<auth user id>';
 ```
 
-### API
+## 4. Security model
+
+- **Auth**: Supabase email/password via the server (`/api/auth/*`). The access/refresh token is
+  stored in an httpOnly, SameSite cookie; the browser never sees it and sessions persist across
+  reloads. Logout revokes the token server-side.
+- **Roles**: `profiles.role` ∈ `customer` | `restaurant_owner` | `rider` | `admin`. Registration
+  rejects `admin`; the server re-reads the role from the database on every request.
+- **Ownership**: an owner can only read/write their own restaurant and its menu (cross-owner access
+  returns 404); a rider only sees orders where `rider_id = auth.uid()`; a customer only sees their
+  own addresses and orders.
+- **Prices**: order totals are recomputed server-side from `menu_items`; any price/quantity total
+  sent by the browser is ignored.
+- **RLS**: policies are defined in the migration; Row Level Security is never disabled. The server
+  uses the secret key, so RLS protects any direct client access to your project.
+- **Uploads**: images are validated by MIME type, size-limited, and uploaded to a Supabase Storage
+  bucket by the server; only the public URL is returned.
+
+## 5. API
 
 | Method | Path | Purpose |
 | --- | --- | --- |
-| `GET` | `/api/health` | Uptime + mode |
-| `GET` | `/api/config` | Mode, categories, status flow |
-| `GET` | `/api/restaurants?category=` | Restaurant list |
-| `GET` | `/api/restaurants/:id` | Restaurant + menu |
-| `PATCH` | `/api/restaurants/:id` | Profile, fees, open/closed, photo |
-| `POST` | `/api/menu-items` | Add dish |
-| `PATCH`/`DELETE` | `/api/menu-items/:id` | Edit / delete dish |
-| `GET` | `/api/orders?restaurant_id=&rider_id=&status=` | Filtered orders |
-| `POST` | `/api/orders` | Place order (validates prices server-side) |
-| `PATCH` | `/api/orders/:id` | Status / rider assignment (transitions enforced) |
-| `GET`/`POST` | `/api/riders`, `PATCH`/`DELETE` `/api/riders/:id` | Rider management |
-| `GET` | `/api/customers`, `PATCH`/`DELETE` `/api/customers/:id` | Customer management |
-| `GET` | `/api/admin/stats` | Admin dashboard counters |
+| `GET` | `/api/health`, `/api/config` | Uptime, mode, categories |
+| `POST` | `/api/auth/register`, `/api/auth/login`, `/api/auth/logout` | Session lifecycle |
+| `GET` | `/api/auth/me` | Current user + profile |
+| `POST` | `/api/auth/forgot-password`, `/api/auth/reset-password`, `/api/auth/password` | Password reset / change |
+| `GET` | `/api/restaurants`, `/api/restaurants/:id` | Active restaurants, menu |
+| `GET` | `/api/categories` | Categories |
+| `GET`/`POST` | `/api/addresses`, `PATCH`/`DELETE` `/api/addresses/:id` | Customer addresses |
+| `GET`/`POST` | `/api/orders` | Order history / place order (server-priced) |
+| `PATCH` | `/api/orders/:id` | Cancel own order |
+| `GET`/`PATCH` | `/api/owner/restaurant` | Owner restaurant profile |
+| `GET`/`POST` | `/api/owner/menu`, `/api/owner/menu-items` | Owner menu |
+| `PATCH`/`DELETE` | `/api/owner/menu-items/:id` | Edit / delete dish |
+| `GET` | `/api/owner/orders` | Incoming orders for own restaurant |
+| `PATCH` | `/api/owner/orders/:id/status` | Accept / prepare / ready / reject |
+| `GET` | `/api/rider/orders` | Deliveries assigned to the signed-in rider |
+| `PATCH` | `/api/rider/orders/:id/status` | Picked up / out for delivery / delivered |
+| `GET` | `/api/admin/overview` | Admin counters + lists |
+| `PATCH` | `/api/admin/restaurants/:id` | Approve / reject restaurant |
+| `PATCH` | `/api/admin/orders/:id/assign` | Assign a rider |
+| `PATCH`/`DELETE` | `/api/admin/profiles/:id` | Block / unblock / delete user |
+| `POST`/`PATCH`/`DELETE` | `/api/admin/categories`, `/api/admin/categories/:id` | Category CRUD |
+| `POST` | `/api/uploads` | Image upload → public URL |
 
 Order statuses move strictly forward:
-`placed → accepted → preparing → ready → out_for_delivery → delivered` (or `cancelled`).
-Invalid jumps are rejected by the server.
+`placed → accepted → preparing → ready → out_for_delivery → delivered` (or `cancelled`). Invalid
+jumps are rejected by the server.
 
----
+## 6. Verification
 
-## Android / mobile notes
+`scripts/e2e-check.mjs` runs the real workflows against your Supabase project (registration, login,
+logout, role isolation, restaurant registration + approval gating, menu CRUD, cross-owner
+protection, ordering rules):
 
-- Layouts are mobile-first; the customer app uses a fixed bottom tab bar with safe-area padding
-  (`env(safe-area-inset-bottom)`) for gesture-nav phones.
-- Touch targets are ≥ 36 px, inputs use `inputMode` so Android shows numeric/tel keyboards.
-- `viewport-fit=cover` + `theme-color` for a native-feeling status bar.
-- Tested at 390 px width; it scales to tablet/desktop with a centered max-width column.
+```bash
+node scripts/cleanup-test-data.mjs && node scripts/e2e-check.mjs
+```
 
-## What is not included (by design)
+Current result: **27/27 checks passed**. `npm run build` (typecheck + bundle) and the dependency
+security scan also pass.
 
-- **No paid services**: no maps, SMS, payment gateway or cloud storage. Cash/UPI-on-delivery is
-  recorded as a preference only — no money moves.
-- **No password auth**: panel identity is a picker (demo). Wire Supabase Auth before going live.
-- Food photos are compressed client-side into the `image_url` column. Move to Supabase Storage for
-  real production volume.
+## 7. Android / mobile notes
+
+- Mobile-first layouts, fixed bottom tab bar with `env(safe-area-inset-bottom)` for gesture nav.
+- Touch targets ≥ 36 px, `inputMode` on numeric/tel fields for the Android keyboard.
+- `viewport-fit=cover` + `theme-color`; verified at 390 px width, scales up to desktop.
+
+## 8. Project structure
+
+```
+server/
+  index.js      Express API + static hosting of dist/ (SPA fallback app.get('/{*splat}'))
+  supabase.js   Service client + auth client + session helpers
+  schema.js     Column discovery (availableColumns / pick) per table
+src/
+  App.tsx       Routes + role guards (RequireRole / GuestOnly)
+  lib/          api.ts, auth.tsx, cart.tsx, types.ts, format.ts, image.ts
+  components/   AppShell.tsx, kit.tsx
+  pages/        Login, Register, ForgotPassword, ResetPassword, CustomerHome,
+                RestaurantDetail, Cart, Checkout, Orders, OwnerDashboard,
+                RiderDashboard, AdminDashboard
+supabase/migrations/20261120000000_swad_mh13_auth.sql
+scripts/e2e-check.mjs, cleanup-test-data.mjs, check-supabase-url.mjs
+```
+
+## 9. Free-tier notes
+
+No paid services: no maps, SMS, payment gateway or external storage beyond Supabase's free Storage
+bucket. Cash / UPI-on-delivery is recorded as a preference only — no money moves.
