@@ -714,7 +714,7 @@ app.post('/api/owner/menu-items', requireAuth('restaurant_owner', 'admin'), wrap
   const { data, error } = await sb
     .from('menu_items')
     .insert(pick({ ...menuPayload(req.body || {}), restaurant_id: restaurant.id }, menuCols))
-    .select('id, restaurant_id, category_id, name, description, price, image_url, is_available, is_veg')
+    .select(await menuReturnColumns())
     .single()
   if (error) fail(500, error.message)
   res.status(201).json({ item: data })
@@ -755,7 +755,7 @@ app.patch('/api/owner/menu-items/:id', requireAuth('restaurant_owner', 'admin'),
     .from('menu_items')
     .update(pick(patch, menuCols))
     .eq('id', item.id)
-    .select('id, restaurant_id, category_id, name, description, price, image_url, is_available, is_veg')
+    .select(await menuReturnColumns())
     .single()
   if (error) fail(500, error.message)
   res.json({ item: data })
