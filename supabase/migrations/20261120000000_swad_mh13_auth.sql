@@ -1,14 +1,26 @@
 -- ============================================================================
--- Swad MH13 — additive migration: Supabase Auth roles, extra columns, RLS
+-- Swad MH13 — migration: auth roles, rider assignment, RLS policies
+--
+-- Additive only. This file:
+--   * never drops, renames or truncates a table,
+--   * never deletes existing rows (the only UPDATE normalises old role values),
+--   * never disables Row Level Security (it enables it),
+--   * is idempotent — safe to run more than once.
 --
 -- Your project already has: profiles, restaurants, categories, menu_items,
--- addresses, orders, order_items. This file NEVER drops or renames them; it
--- only adds the columns the app needs and turns on Row Level Security.
+-- addresses, orders, order_items. Existing columns and data are preserved.
 --
--- Run once: Supabase dashboard -> SQL Editor -> paste -> Run. Safe to re-run.
+-- How to run: Supabase dashboard -> SQL Editor -> New query -> paste -> Run.
 -- ============================================================================
 
--- ---------------------------------------------------------------- profiles
+-- ---------------------------------------------------------------------------
+-- 0. Normalise the role vocabulary (existing rows only, no deletion).
+--    The app uses 'restaurant_owner'; older rows may say 'owner'.
+-- ---------------------------------------------------------------------------
+update public.profiles set role = 'restaurant_owner' where role = 'owner';
+update public.profiles set role = 'customer' where role is null;
+
+-- ---------------------------------------------------------------- profiles --
 alter table public.profiles
   add column if not exists email      text,
   add column if not exists is_blocked boolean not null default false;
@@ -20,7 +32,7 @@ alter table public.profiles
   add constraint profiles_role_check
   check (role is null or role in ('customer', 'restaurant_owner', 'rider', 'admin'));
 
--- ------------------------------------------------------------- restaurants
+-- ------------------------------------------------------------- restaurants --
 alter table public.restaurants
   add column if not exists city             text,
   add column if not exists pincode          text,
@@ -30,11 +42,20 @@ alter table public.restaurants
   add column if not exists delivery_fee     numeric not null default 25,
   add column if not exists updated_at       timestamptz not null default now();
 
--- -------------------------------------------------------------- menu_items
+-- -------------------------------------------------------------- menu_items --
 alter table public.menu_items
   add column if not exists is_veg boolean not null default true;
 
--- ------------------------------------------------------------------ orders
+-- ------------------------------------------------------------- order_items --
+-- Keep the dish name and price as they were when the order was placed, so
+-- later price edits never rewrite order history.
+alter table public.order_items
+  add column if not exists name  text,
+  add column if not exists price numeric(10, 2) not null default 0;
+
+-- ------------------------------------------------------------------ orders --
+-- rider_id points at public.profiles.id, which is the Supabase auth user id
+-- (the same value as auth.uid()), so a rider sees exactly their deliveries.
 alter table public.orders
   add column if not exists rider_id         uuid references public.profiles (id) on delete set null,
   add column if not exists subtotal         numeric not null default 0,
@@ -51,8 +72,9 @@ create index if not exists orders_status_idx   on public.orders (order_status);
 create index if not exists menu_items_rest_idx on public.menu_items (restaurant_id);
 
 -- ============================================================================
--- Helper functions used by the policies below.
--- security definer so reading profiles inside a policy cannot recurse.
+-- 1. Helper functions used by the policies.
+--    security definer so a policy can read profiles/restaurants without
+--    recursing into the very policies being evaluated.
 -- ============================================================================
 create or replace function public.is_admin() returns boolean
 language sql stable security definer set search_path = public as $$
@@ -68,7 +90,7 @@ language sql stable security definer set search_path = public as $$
 $$;
 
 -- ============================================================================
--- Row Level Security
+-- 2. Row Level Security — enabled everywhere, never disabled.
 -- ============================================================================
 alter table public.profiles    enable row level security;
 alter table public.restaurants enable row level security;
@@ -78,7 +100,7 @@ alter table public.addresses   enable row level security;
 alter table public.orders      enable row level security;
 alter table public.order_items enable row level security;
 
--- profiles: you see yourself; admins see everyone.
+-- ---------------------------------------------------------------- profiles --
 drop policy if exists profiles_select on public.profiles;
 create policy profiles_select on public.profiles for select to authenticated
   using (id = auth.uid() or public.is_admin());
@@ -92,7 +114,7 @@ create policy profiles_update on public.profiles for update to authenticated
   using (id = auth.uid() or public.is_admin())
   with check (id = auth.uid() or public.is_admin());
 
--- restaurants: approved ones are public; owners see and edit their own.
+-- ------------------------------------------------------------- restaurants --
 drop policy if exists restaurants_select on public.restaurants;
 create policy restaurants_select on public.restaurants for select to anon, authenticated
   using (is_active or owner_user_id = auth.uid() or public.is_admin());
@@ -110,7 +132,7 @@ drop policy if exists restaurants_delete on public.restaurants;
 create policy restaurants_delete on public.restaurants for delete to authenticated
   using (owner_user_id = auth.uid() or public.is_admin());
 
--- menu_items: readable for approved restaurants; writable by the owning chef.
+-- -------------------------------------------------------------- menu_items --
 drop policy if exists menu_items_select on public.menu_items;
 create policy menu_items_select on public.menu_items for select to anon, authenticated
   using (
@@ -124,7 +146,7 @@ create policy menu_items_write on public.menu_items for all to authenticated
   using (public.owns_restaurant(restaurant_id) or public.is_admin())
   with check (public.owns_restaurant(restaurant_id) or public.is_admin());
 
--- categories: everyone reads, only admins curate.
+-- -------------------------------------------------------------- categories --
 drop policy if exists categories_select on public.categories;
 create policy categories_select on public.categories for select to anon, authenticated using (true);
 
@@ -132,13 +154,14 @@ drop policy if exists categories_write on public.categories;
 create policy categories_write on public.categories for all to authenticated
   using (public.is_admin()) with check (public.is_admin());
 
--- addresses: strictly the owner's own rows.
+-- --------------------------------------------------------------- addresses --
 drop policy if exists addresses_all on public.addresses;
 create policy addresses_all on public.addresses for all to authenticated
   using (user_id = auth.uid() or public.is_admin())
   with check (user_id = auth.uid() or public.is_admin());
 
--- orders: customer, the restaurant's owner, the assigned rider, or admin.
+-- ------------------------------------------------------------------ orders --
+-- Customer (own order), the restaurant's owner, the assigned rider, or admin.
 drop policy if exists orders_select on public.orders;
 create policy orders_select on public.orders for select to authenticated
   using (
@@ -148,10 +171,12 @@ create policy orders_select on public.orders for select to authenticated
     or public.is_admin()
   );
 
+-- A customer may only create an order for themselves.
 drop policy if exists orders_insert on public.orders;
 create policy orders_insert on public.orders for insert to authenticated
   with check (user_id = auth.uid());
 
+-- Status changes: the restaurant owner, the assigned rider, or an admin.
 drop policy if exists orders_update on public.orders;
 create policy orders_update on public.orders for update to authenticated
   using (
@@ -165,7 +190,7 @@ create policy orders_update on public.orders for update to authenticated
     or public.is_admin()
   );
 
--- order_items: readable/writable only through an order you can already see.
+-- ------------------------------------------------------------- order_items --
 drop policy if exists order_items_select on public.order_items;
 create policy order_items_select on public.order_items for select to authenticated
   using (exists (
@@ -182,8 +207,11 @@ create policy order_items_insert on public.order_items for insert to authenticat
   ));
 
 -- ============================================================================
--- Privilege guards: nobody can promote themselves.
+-- 3. Privilege guards — nobody can promote themselves.
 -- ============================================================================
+
+-- Only an admin may change profiles.role. (auth.uid() is null for the
+-- server-side service key and for the SQL editor, so those still work.)
 create or replace function public.prevent_role_escalation() returns trigger
 language plpgsql security definer set search_path = public as $$
 begin
@@ -197,7 +225,7 @@ drop trigger if exists profiles_role_guard on public.profiles;
 create trigger profiles_role_guard before update on public.profiles
   for each row execute function public.prevent_role_escalation();
 
--- A restaurant owner must not be able to flip is_active on their own listing.
+-- An owner cannot approve or suspend their own restaurant.
 create or replace function public.prevent_self_approval() returns trigger
 language plpgsql security definer set search_path = public as $$
 begin
@@ -212,15 +240,38 @@ drop trigger if exists restaurants_approval_guard on public.restaurants;
 create trigger restaurants_approval_guard before update on public.restaurants
   for each row execute function public.prevent_self_approval();
 
+-- orders.rider_id may only reference an account whose role is 'rider'.
+create or replace function public.validate_rider_assignment() returns trigger
+language plpgsql security definer set search_path = public as $$
+begin
+  if new.rider_id is not null
+     and (tg_op = 'INSERT' or new.rider_id is distinct from old.rider_id)
+     and not exists (
+       select 1 from public.profiles p where p.id = new.rider_id and p.role = 'rider'
+     )
+  then
+    raise exception 'Only an account with the rider role can be assigned to an order';
+  end if;
+  return new;
+end $$;
+
+drop trigger if exists orders_rider_guard on public.orders;
+create trigger orders_rider_guard before insert or update of rider_id on public.orders
+  for each row execute function public.validate_rider_assignment();
+
 -- ============================================================================
--- Profile row for every new auth user (role can never be admin here).
+-- 4. Profile row for every new auth user (role can never be admin here).
 -- ============================================================================
 create or replace function public.handle_new_user() returns trigger
 language plpgsql security definer set search_path = public as $$
 declare v_role text;
 begin
   v_role := coalesce(new.raw_user_meta_data ->> 'role', 'customer');
-  if v_role not in ('customer', 'owner', 'rider') then
+  -- 'owner' is the legacy spelling; the app writes 'restaurant_owner'.
+  if v_role = 'owner' then
+    v_role := 'restaurant_owner';
+  end if;
+  if v_role not in ('customer', 'restaurant_owner', 'rider') then
     v_role := 'customer';
   end if;
 
@@ -242,7 +293,15 @@ create trigger on_auth_user_created after insert on auth.users
   for each row execute function public.handle_new_user();
 
 -- ============================================================================
--- Storage bucket for restaurant logos and food photos.
+-- 5. Table privileges (RLS then decides which rows are visible).
+-- ============================================================================
+grant usage on schema public to anon, authenticated;
+grant select, insert, update, delete on all tables in schema public to authenticated;
+grant usage, select on all sequences in schema public to authenticated;
+grant select on public.restaurants, public.categories, public.menu_items to anon;
+
+-- ============================================================================
+-- 6. Storage bucket for restaurant logos and food photos (free tier).
 -- ============================================================================
 insert into storage.buckets (id, name, public)
 values ('food-images', 'food-images', true)
@@ -261,11 +320,9 @@ create policy "owners replace their food images" on storage.objects for update t
   using (bucket_id = 'food-images' and owner = auth.uid());
 
 -- ============================================================================
--- ADMIN BOOTSTRAP (run by hand, once, in the SQL editor — never from the app):
+-- 7. ADMIN / RIDER BOOTSTRAP — run by hand, once, in the SQL editor.
+--    (Never callable from the app.)
 --
 --   update public.profiles set role = 'admin' where email = 'you@example.com';
---
--- Riders are promoted the same way:
---
 --   update public.profiles set role = 'rider' where email = 'rider@example.com';
 -- ============================================================================
