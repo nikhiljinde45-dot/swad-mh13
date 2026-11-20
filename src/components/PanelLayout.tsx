@@ -60,7 +60,8 @@ export default function PanelLayout() {
             <strong className="font-bold">Database tables missing:</strong>{' '}
             <span className="font-mono">{missing.join(', ')}</span>. Run{' '}
             <code className="rounded bg-amber-900/10 px-1 py-0.5 font-mono">supabase/schema.sql</code>{' '}
-            in your Supabase SQL editor to create them — these panels stay empty until then.
+            in your Supabase SQL editor to create them. Until then those panels run on built-in demo
+            data, so you can still test them.
           </div>
         )}
         <Outlet />
