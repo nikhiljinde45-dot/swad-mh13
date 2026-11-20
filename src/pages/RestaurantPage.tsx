@@ -121,7 +121,7 @@ export default function RestaurantPage() {
           <div className="flex-1">
             <p className="flex items-center justify-center gap-1 text-sm font-bold text-emerald-700">
               <Icon.Star className="h-3.5 w-3.5 text-emerald-600" />
-              {restaurant.rating.toFixed(1)}
+              {Number(restaurant.rating ?? 0).toFixed(1)}
             </p>
             <p className="text-[10px] text-ink-500">{restaurant.rating_count} ratings</p>
           </div>

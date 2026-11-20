@@ -254,6 +254,29 @@ async function maps() {
   }
 }
 
+/**
+ * Rows created outside the app (or before schema.sql ran) can have NULL numeric
+ * columns. Coerce them once here so the UI never formats `undefined`.
+ */
+function normalizeRestaurant(row) {
+  if (!row) return row
+  const defaults = {
+    rating: 4.5,
+    rating_count: 0,
+    delivery_fee: 0,
+    min_order: 0,
+    price_for_two: 0,
+    delivery_minutes: 30,
+  }
+  const out = { ...row }
+  for (const [key, fallback] of Object.entries(defaults)) {
+    const n = Number(out[key])
+    out[key] = Number.isFinite(n) ? n : fallback
+  }
+  out.is_open = out.is_open !== false
+  return out
+}
+
 /* ------------------------------------------------------------------ */
 /* Restaurants                                                         */
 /* ------------------------------------------------------------------ */
@@ -265,7 +288,7 @@ export async function listRestaurants({ category } = {}) {
     if (category && category !== 'all') q = q.eq('category', category)
     const { data, error } = await q
     if (error) throw new Error(error.message)
-    rows = data
+    rows = (data || []).map(normalizeRestaurant)
   } else {
     rows = memory.restaurants.filter((r) => !category || category === 'all' || r.category === category)
     rows = [...rows].sort((a, b) => a.name.localeCompare(b.name))
@@ -277,7 +300,7 @@ export async function getRestaurant(id) {
   if (useSupabase('restaurants')) {
     const { data, error } = await sb.from('restaurants').select('*').eq('id', id).maybeSingle()
     if (error) throw new Error(error.message)
-    return data
+    return normalizeRestaurant(data)
   }
   return memory.restaurants.find((r) => r.id === id) || null
 }

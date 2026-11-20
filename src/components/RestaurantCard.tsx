@@ -23,7 +23,7 @@ export default function RestaurantCard({ restaurant }: { restaurant: Restaurant 
           <h3 className="truncate text-[15px] font-bold leading-tight text-ink-900">{restaurant.name}</h3>
           <span className="flex shrink-0 items-center gap-1 rounded-md bg-emerald-600 px-1.5 py-0.5 text-[11px] font-bold text-white">
             <Icon.Star className="h-2.5 w-2.5" />
-            {restaurant.rating.toFixed(1)}
+            {Number(restaurant.rating ?? 0).toFixed(1)}
           </span>
         </div>
 

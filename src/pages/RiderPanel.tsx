@@ -180,7 +180,7 @@ export default function RiderPanel() {
               <div className="min-w-0 flex-1">
                 <p className="truncate text-sm font-bold text-ink-900">{rider.name}</p>
                 <p className="text-[11px] text-ink-500">
-                  {rider.vehicle} • {rider.area} • ⭐ {rider.rating.toFixed(1)}
+                  {rider.vehicle} • {rider.area} • ⭐ {Number(rider.rating ?? 0).toFixed(1)}
                 </p>
               </div>
               <span

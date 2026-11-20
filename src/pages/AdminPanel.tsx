@@ -332,7 +332,7 @@ export default function AdminPanel() {
                 <div className="min-w-0">
                   <p className="truncate text-sm font-bold text-ink-900">{restaurant.name}</p>
                   <p className="text-[11px] text-ink-500">
-                    {restaurant.cuisine} • {restaurant.area} • ⭐ {restaurant.rating.toFixed(1)}
+                    {restaurant.cuisine} • {restaurant.area} • ⭐ {Number(restaurant.rating ?? 0).toFixed(1)}
                   </p>
                   <p className="text-[10px] text-ink-500">
                     {inr(restaurant.delivery_fee)} delivery • min {inr(restaurant.min_order)} •{' '}
@@ -381,7 +381,7 @@ export default function AdminPanel() {
                       {rider.phone} • {rider.area} • {rider.vehicle}
                     </p>
                     <p className="text-[10px] text-ink-500">
-                      {rider.deliveries} deliveries • ⭐ {rider.rating.toFixed(1)}
+                      {rider.deliveries} deliveries • ⭐ {Number(rider.rating ?? 0).toFixed(1)}
                     </p>
                   </div>
                   <button
