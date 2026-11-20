@@ -210,7 +210,7 @@ function degradeForMissingTable(table, error, fallback) {
 }
 
 /** Probe each required table once at boot so /api/config can report what is missing. */
-async function detectMissingTables() {
+export async function detectMissingTables() {
   status.missingTables = []
   if (!useSupabase()) return status.missingTables
 
@@ -221,9 +221,9 @@ async function detectMissingTables() {
     else console.warn(`[swad-mh13] probe "${table}" failed: ${error.message}`)
   }
 
-  if (status.missingTables.length) {
-    status.warning = `Connected to Supabase, but these tables do not exist yet: ${status.missingTables.join(', ')}. Run supabase/schema.sql in the Supabase SQL editor to create them.`
-  }
+  status.warning = status.missingTables.length
+    ? `Connected to Supabase, but these tables do not exist yet: ${status.missingTables.join(', ')}. Run supabase/schema.sql in the Supabase SQL editor to create them.`
+    : null
   return status.missingTables
 }
 

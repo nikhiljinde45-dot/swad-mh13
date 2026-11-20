@@ -18,7 +18,12 @@ app.get('/api/health', (_req, res) => {
   res.json({ ok: true, app: 'Swad MH13', mode: db.status.mode, time: new Date().toISOString() })
 })
 
-app.get('/api/config', (_req, res) => {
+app.get('/api/config', wrap(async (_req, res) => {
+  // If tables were missing at boot, re-probe on each config read: running
+  // supabase/schema.sql in Supabase then clears the notice with no restart.
+  if (db.status.mode === 'supabase' && db.status.missingTables.length) {
+    await db.detectMissingTables()
+  }
   res.json({
     app: 'Swad MH13',
     mode: db.status.mode,
@@ -32,7 +37,7 @@ app.get('/api/config', (_req, res) => {
     flow: db.ORDER_FLOW,
     categories: db.listCategories(),
   })
-})
+}))
 
 /* -------------------------- restaurants ------------------------- */
 
