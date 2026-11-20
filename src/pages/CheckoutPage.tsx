@@ -233,6 +233,13 @@ export default function CheckoutPage() {
                   </button>
                 ))}
               </div>
+              <div className="rounded-xl bg-slate-50 p-2.5 text-[11px] leading-relaxed text-slate-500">
+                <span className="font-bold text-slate-700">
+                  Pay online (UPI / card) — not enabled yet.
+                </span>{' '}
+                You pay the rider on delivery by cash or UPI. Card and online UPI open up once a
+                payment provider is connected.
+              </div>
               <Field label="Notes for the kitchen" hint="Optional">
                 <Input
                   value={notes}

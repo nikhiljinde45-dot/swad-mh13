@@ -147,6 +147,14 @@ export default function OrdersPage() {
                         </p>
                       )}
 
+                      <p className="text-xs text-slate-600">
+                        <span className="font-bold">Payment:</span>{' '}
+                        {order.payment_method === 'upi' ? 'UPI on delivery' : 'Cash on delivery'} ·{' '}
+                        {order.payment_status === 'paid'
+                          ? 'Paid'
+                          : `Pay ${inr(orderTotal(order))} on delivery`}
+                      </p>
+
                       {order.notes && (
                         <p className="text-xs text-slate-600">
                           <span className="font-bold">Note:</span> {order.notes}

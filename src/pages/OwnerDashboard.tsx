@@ -422,7 +422,8 @@ export default function OwnerDashboard() {
                         {(order.order_items?.length ?? 0) === 1 ? '' : 's'}
                       </p>
                       <p className="text-[11px] text-slate-500">
-                        {timeAgo(order.created_at)} · {order.payment_method?.toUpperCase() || 'COD'}
+                        {timeAgo(order.created_at)} · {order.payment_method?.toUpperCase() || 'COD'} ·{' '}
+                        {order.payment_status === 'paid' ? 'PAID' : 'PENDING'}
                       </p>
                     </div>
                     <StatusPill status={order.order_status} />

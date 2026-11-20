@@ -137,6 +137,20 @@ app.get('/api/config', wrap(async (_req, res) => {
 
 /* --------------------------- public data -------------------------- */
 
+// Payment options that work without a payment provider: the customer pays the
+// rider on delivery. Online payment stays off until a gateway is connected.
+app.get('/api/payments/config', wrap(async (_req, res) => {
+  res.json({
+    online_enabled: false,
+    provider: null,
+    currency: 'INR',
+    methods: [
+      { id: 'cod', label: 'Cash on delivery' },
+      { id: 'upi', label: 'UPI on delivery' },
+    ],
+  })
+}))
+
 app.get('/api/categories', wrap(async (_req, res) => {
   if (!configured) fail(503, 'Supabase is not configured on the server')
   const { data, error } = await sb.from('categories').select('id, name, image_url').order('name')
@@ -485,7 +499,14 @@ app.post('/api/orders', requireAuth('customer', 'admin'), wrap(async (req, res) 
   if (!rawItems.length) fail(400, 'Your cart is empty')
   if (rawItems.length > 40) fail(400, 'Too many different items in one order')
 
-  const paymentMethod = clean(body.payment_method) === 'upi' ? 'upi' : 'cod'
+  const requestedPayment = clean(body.payment_method) || 'cod'
+  if (requestedPayment === 'online') {
+    fail(400, 'Online payment is not enabled yet — choose cash or UPI on delivery')
+  }
+  if (!['cod', 'upi'].includes(requestedPayment)) {
+    fail(400, 'Choose cash on delivery or UPI on delivery')
+  }
+  const paymentMethod = requestedPayment
   const notes = clean(body.notes).slice(0, 400)
 
   const { data: restaurant, error: restaurantError } = await sb

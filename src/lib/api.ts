@@ -139,6 +139,13 @@ export const api = {
     payment_method?: 'cod' | 'upi'
     notes?: string
   }) => request<{ order: Order }>('/api/orders', { method: 'POST', body: payload }),
+  paymentConfig: () =>
+    request<{
+      online_enabled: boolean
+      provider: string | null
+      currency: string
+      methods: { id: 'cod' | 'upi'; label: string }[]
+    }>('/api/payments/config'),
   orders: () => request<{ orders: Order[] }>('/api/orders'),
   order: (id: string) => request<{ order: Order }>(`/api/orders/${id}`),
 

@@ -339,6 +339,12 @@ async function main() {
         placed.status === 201 && Boolean(orderId),
         `${placed.status} ${placed.json?.error ?? ''}`,
       )
+      check(
+        'order starts payment-pending with the chosen method',
+        placed.json?.order?.payment_status === 'pending' &&
+          placed.json?.order?.payment_method === 'cod',
+        `${placed.json?.order?.payment_status} / ${placed.json?.order?.payment_method}`,
+      )
 
       for (const status of ['accepted', 'preparing', 'ready']) {
         await owner.call(`/api/owner/orders/${orderId}/status`, { method: 'PATCH', body: { status } })
@@ -418,6 +424,21 @@ async function main() {
         'customer sees the delivered status',
         customerView.json?.order?.order_status === 'delivered',
         `${customerView.status}`,
+      )
+      check(
+        'delivery marks the payment as paid',
+        delivered.json?.order?.payment_status === 'paid' &&
+          customerView.json?.order?.payment_status === 'paid',
+        `${delivered.json?.order?.payment_status} / ${customerView.json?.order?.payment_status}`,
+      )
+
+      const payConfig = await makeClient().call('/api/payments/config')
+      check(
+        'payment config offers cash and UPI only',
+        payConfig.status === 200 &&
+          payConfig.json?.online_enabled === false &&
+          (payConfig.json?.methods ?? []).map((method) => method.id).join(',') === 'cod,upi',
+        `${payConfig.status} online=${payConfig.json?.online_enabled}`,
       )
 
       const overview = await admin.call('/api/admin/overview')

@@ -142,6 +142,13 @@ export default function RiderDashboard() {
                   <p>{order.delivery_address || 'Address shared by the restaurant'}</p>
                 </div>
 
+                {order.payment_status !== 'paid' && (
+                  <p className="rounded-lg bg-amber-50 px-2 py-1.5 text-[11px] font-bold text-amber-800">
+                    Collect {inr(orderTotal(order))} (
+                    {order.payment_method === 'upi' ? 'UPI' : 'cash'}) on delivery
+                  </p>
+                )}
+
                 {order.notes && (
                   <p className="text-[11px] text-slate-600">
                     <span className="font-bold">Note:</span> {order.notes}

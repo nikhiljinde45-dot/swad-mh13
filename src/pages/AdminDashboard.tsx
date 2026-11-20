@@ -369,7 +369,8 @@ export default function AdminDashboard() {
                       </p>
                       <p className="text-[11px] text-slate-500">
                         {timeAgo(order.created_at)} · {inr(orderTotal(order))} ·{' '}
-                        {order.payment_method?.toUpperCase() || 'COD'}
+                        {order.payment_method?.toUpperCase() || 'COD'} ·{' '}
+                        {order.payment_status === 'paid' ? 'PAID' : 'PENDING'}
                       </p>
                     </div>
                     <StatusPill status={order.order_status} />
