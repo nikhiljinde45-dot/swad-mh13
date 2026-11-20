@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { AppShell } from '../components/AppShell'
 import { Alert, Button, Card, EmptyState, Spinner, StatusPill, cx } from '../components/kit'
+import { PaymentSheet } from '../components/PaymentSheet'
 import { ApiError, api } from '../lib/api'
 import { useAuth } from '../lib/auth'
 import { inr, orderTotal, timeAgo } from '../lib/format'
@@ -13,8 +14,10 @@ export default function OrdersPage() {
   const { user, role } = useAuth()
   const [params] = useSearchParams()
   const placed = params.get('placed')
+  const payOrder = params.get('pay')
   const [orders, setOrders] = useState<Order[]>([])
-  const [openId, setOpenId] = useState<string | null>(placed)
+  const [openId, setOpenId] = useState<string | null>(placed ?? payOrder)
+  const [payId, setPayId] = useState<string | null>(payOrder)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
@@ -149,11 +152,26 @@ export default function OrdersPage() {
 
                       <p className="text-xs text-slate-600">
                         <span className="font-bold">Payment:</span>{' '}
-                        {order.payment_method === 'upi' ? 'UPI on delivery' : 'Cash on delivery'} ·{' '}
+                        {order.payment_method === 'upi'
+                          ? 'UPI on delivery'
+                          : order.payment_method === 'online'
+                            ? 'Online UPI'
+                            : 'Cash on delivery'}{' '}
+                        ·{' '}
                         {order.payment_status === 'paid'
                           ? 'Paid'
-                          : `Pay ${inr(orderTotal(order))} on delivery`}
+                          : order.payment_method === 'online'
+                            ? `${inr(orderTotal(order))} due — pay by UPI QR`
+                            : `Pay ${inr(orderTotal(order))} on delivery`}
                       </p>
+
+                      {order.payment_status !== 'paid' &&
+                        order.payment_method !== 'cod' &&
+                        !['cancelled', 'rejected'].includes(order.order_status) && (
+                          <Button size="sm" onClick={() => setPayId(order.id)}>
+                            Pay {inr(orderTotal(order))} by UPI QR
+                          </Button>
+                        )}
 
                       {order.notes && (
                         <p className="text-xs text-slate-600">
@@ -193,6 +211,14 @@ export default function OrdersPage() {
           </div>
         )}
       </div>
+
+      <PaymentSheet
+        open={Boolean(payId)}
+        orderId={payId}
+        allowClaim
+        onClose={() => setPayId(null)}
+        onPaid={() => void load()}
+      />
     </AppShell>
   )
 }

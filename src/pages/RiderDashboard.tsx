@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { AppShell } from '../components/AppShell'
 import { Alert, Button, Card, EmptyState, Spinner, Stat, StatusPill } from '../components/kit'
+import { PaymentSheet } from '../components/PaymentSheet'
 import { ApiError, api } from '../lib/api'
 import { useAuth } from '../lib/auth'
 import { inr, orderTotal, timeAgo } from '../lib/format'
@@ -12,6 +13,7 @@ export default function RiderDashboard() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [busyId, setBusyId] = useState<string | null>(null)
+  const [payId, setPayId] = useState<string | null>(null)
   // false when the database still lacks orders.rider_id (migration not run yet)
   const [riderReady, setRiderReady] = useState(true)
 
@@ -143,10 +145,26 @@ export default function RiderDashboard() {
                 </div>
 
                 {order.payment_status !== 'paid' && (
-                  <p className="rounded-lg bg-amber-50 px-2 py-1.5 text-[11px] font-bold text-amber-800">
-                    Collect {inr(orderTotal(order))} (
-                    {order.payment_method === 'upi' ? 'UPI' : 'cash'}) on delivery
-                  </p>
+                  <div className="rounded-lg bg-amber-50 px-2 py-1.5 text-[11px] font-bold text-amber-800">
+                    <p>
+                      Collect {inr(orderTotal(order))} (
+                      {order.payment_method === 'online'
+                        ? 'UPI QR'
+                        : order.payment_method === 'upi'
+                          ? 'UPI'
+                          : 'cash'}
+                      ) on delivery
+                    </p>
+                    {(order.payment_method === 'upi' || order.payment_method === 'online') && (
+                      <button
+                        type="button"
+                        onClick={() => setPayId(order.id)}
+                        className="mt-1 underline decoration-amber-700"
+                      >
+                        Show payment QR
+                      </button>
+                    )}
+                  </div>
                 )}
 
                 {order.notes && (
@@ -183,6 +201,13 @@ export default function RiderDashboard() {
           </div>
         )}
       </div>
+
+      <PaymentSheet
+        open={Boolean(payId)}
+        orderId={payId}
+        onClose={() => setPayId(null)}
+        onPaid={() => void load()}
+      />
     </AppShell>
   )
 }
