@@ -112,10 +112,32 @@ export async function loadProfile(userId) {
 }
 
 /** Resolve the cookie into a user + profile, refreshing the token if needed. */
+/**
+ * Sessions are stateless JWTs in an httpOnly cookie, so logout also has to
+ * invalidate them here: an access token stays valid until it expires, and a
+ * refresh token would otherwise mint a new one. Revoked tokens are remembered
+ * until their own expiry.
+ */
+const revokedTokens = new Map()
+
+export function revokeSession(accessToken) {
+  if (!accessToken) return
+  const expiry = jwtExpiry(accessToken) * 1000
+  revokedTokens.set(accessToken, expiry > Date.now() ? expiry : Date.now() + 3_600_000)
+  for (const [token, expiresAt] of revokedTokens) {
+    if (expiresAt <= Date.now()) revokedTokens.delete(token)
+  }
+}
+
 export async function resolveSession(req, res) {
   const raw = readCookie(req, COOKIE_NAME)
   const tokens = raw ? decodeSession(raw) : null
   if (!tokens) return null
+
+  if (revokedTokens.has(tokens.at)) {
+    clearCookie(req, res, COOKIE_NAME)
+    return null
+  }
 
   let user = null
 
