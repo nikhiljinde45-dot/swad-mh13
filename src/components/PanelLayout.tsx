@@ -1,5 +1,8 @@
+import { useEffect, useState } from 'react'
 import { Link, Outlet, useLocation } from 'react-router-dom'
 import { Icon } from './ui'
+import { api } from '../lib/api'
+import type { AppConfig } from '../lib/types'
 
 const TITLES: Record<string, string> = {
   '/panels': 'Choose a panel',
@@ -11,6 +14,16 @@ const TITLES: Record<string, string> = {
 export default function PanelLayout() {
   const { pathname } = useLocation()
   const title = TITLES[pathname] ?? 'Partner'
+  const [config, setConfig] = useState<AppConfig | null>(null)
+
+  useEffect(() => {
+    api
+      .config()
+      .then(setConfig)
+      .catch(() => setConfig(null))
+  }, [])
+
+  const missing = config?.missing_tables ?? []
 
   return (
     <div className="min-h-dvh bg-ink-900/[0.03]">
@@ -39,6 +52,17 @@ export default function PanelLayout() {
       </header>
 
       <main className="mx-auto w-full max-w-3xl px-4 pb-16 pt-4">
+        {missing.length > 0 && (
+          <div
+            role="status"
+            className="mb-4 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2.5 text-[11px] leading-relaxed text-amber-900"
+          >
+            <strong className="font-bold">Database tables missing:</strong>{' '}
+            <span className="font-mono">{missing.join(', ')}</span>. Run{' '}
+            <code className="rounded bg-amber-900/10 px-1 py-0.5 font-mono">supabase/schema.sql</code>{' '}
+            in your Supabase SQL editor to create them — these panels stay empty until then.
+          </div>
+        )}
         <Outlet />
       </main>
     </div>
