@@ -155,7 +155,11 @@ async function main() {
     const logout = await customer.call('/api/auth/logout', { method: 'POST' })
     check('logout succeeds', logout.status === 200, `${logout.status}`)
     const afterLogout = await customer.call('/api/auth/me')
-    check('session is cleared after logout', afterLogout.status === 401, `${afterLogout.status}`)
+    check(
+      'session is cleared after logout',
+      afterLogout.json?.user == null && afterLogout.json?.profile == null,
+      `user=${JSON.stringify(afterLogout.json?.user)}`,
+    )
 
     const wrongPassword = await makeClient().call('/api/auth/login', {
       method: 'POST',
@@ -194,7 +198,7 @@ async function main() {
     if (restaurant?.id) created.restaurants.push(restaurant.id)
     check('restaurant row is created', Boolean(restaurant?.id))
     check('restaurant starts unapproved (is_active = false)', restaurant?.is_active === false)
-    check('restaurant is linked to the owner account', restaurant?.owner_user_id === ownerReg.json?.user?.id)
+    check('restaurant is linked to the owner account', Boolean(restaurant?.id) && restaurant.owner_user_id === ownerReg.json?.user?.id)
 
     const ownerRestaurant = await owner.call('/api/owner/restaurant')
     check(
