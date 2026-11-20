@@ -441,15 +441,104 @@ async function main() {
 
       const payConfig = await makeClient().call('/api/payments/config')
       check(
-        'payment config offers cash and UPI only',
+        'payment config offers cash, UPI on delivery and online UPI',
         payConfig.status === 200 &&
-          payConfig.json?.online_enabled === false &&
-          (payConfig.json?.methods ?? []).map((method) => method.id).join(',') === 'cod,upi',
+          payConfig.json?.online_enabled === true &&
+          (payConfig.json?.methods ?? []).map((method) => method.id).join(',') === 'cod,upi,online' &&
+          payConfig.json?.provider === 'upi' &&
+          payConfig.json?.currency === 'INR',
         `${payConfig.status} online=${payConfig.json?.online_enabled}`,
+      )
+
+      // --- online payment: QR is built from the stored total, not the browser
+      const onlineOrder = await customer.call('/api/orders', {
+        method: 'POST',
+        body: {
+          restaurant_id: restaurant.id,
+          items: [{ menu_item_id: riderItemId, quantity: 1 }],
+          full_address: '7 Online Pay Road',
+          city: 'Nashik',
+          pincode: '422001',
+          payment_method: 'online',
+        },
+      })
+      const onlineId = onlineOrder.json?.order?.id
+      if (onlineId) created.orders.push(onlineId)
+      check(
+        'customer can choose online payment at checkout',
+        onlineOrder.status === 201 &&
+          onlineOrder.json?.order?.payment_method === 'online' &&
+          onlineOrder.json?.order?.payment_status === 'pending',
+        `${onlineOrder.status} ${onlineOrder.json?.error ?? ''}`,
+      )
+
+      const onlineTotal = Number(onlineOrder.json?.order?.total_amount ?? 0).toFixed(2)
+      const qr = await customer.call(`/api/orders/${onlineId}/payment-qr`)
+      const decodedQr = decodeURIComponent(qr.json?.upi_string ?? '')
+      check(
+        'payment QR carries the exact order amount and the UPI ID',
+        qr.status === 200 &&
+          Number(qr.json?.amount) === Number(onlineTotal) &&
+          decodedQr.startsWith('upi://pay?') &&
+          decodedQr.includes('pa=swadtest@okaxis') &&
+          decodedQr.includes(`am=${onlineTotal}`) &&
+          decodedQr.includes('cu=INR'),
+        `${qr.status} amount=${qr.json?.amount} expected=${onlineTotal}`,
+      )
+
+      const strangerQr = await stranger.call(`/api/orders/${onlineId}/payment-qr`)
+      check('an unrelated rider cannot read that payment QR', strangerQr.status === 403, `${strangerQr.status}`)
+
+      const strangerClaim = await stranger.call(`/api/orders/${onlineId}/payment/claim`, { method: 'POST' })
+      check('an unrelated user cannot mark it paid', strangerClaim.status === 403, `${strangerClaim.status}`)
+
+      const claimed = await customer.call(`/api/orders/${onlineId}/payment/claim`, { method: 'POST' })
+      check(
+        'customer payment claim marks the online order paid',
+        claimed.status === 200 && claimed.json?.order?.payment_status === 'paid',
+        `${claimed.status} ${claimed.json?.order?.payment_status ?? claimed.json?.error ?? ''}`,
+      )
+
+      const paidView = await customer.call(`/api/orders/${onlineId}`)
+      check(
+        'customer sees the online order as paid',
+        paidView.json?.order?.payment_status === 'paid',
+        `${paidView.json?.order?.payment_status}`,
       )
 
       const overview = await admin.call('/api/admin/overview')
       check('admin overview reports rider assignment enabled', overview.json?.riderAssignmentReady === true)
+
+      // Without a UPI ID or a QR image the online option must stay hidden.
+      const barePort = PORT + 1
+      const bare = spawn(process.execPath, ['server/index.js'], {
+        env: {
+          ...process.env,
+          PORT: String(barePort),
+          UPI_VPA: '',
+          PAYMENT_QR_IMAGE_URL: '',
+        },
+        stdio: 'ignore',
+      })
+      try {
+        let bareConfig = null
+        for (let attempt = 0; attempt < 40 && !bareConfig; attempt += 1) {
+          try {
+            const response = await fetch(`http://127.0.0.1:${barePort}/api/payments/config`)
+            if (response.ok) bareConfig = await response.json()
+          } catch {
+            await new Promise((resolve) => setTimeout(resolve, 250))
+          }
+        }
+        check(
+          'online payment stays hidden until a UPI ID or QR image is configured',
+          bareConfig?.online_enabled === false &&
+            (bareConfig?.methods ?? []).map((method) => method.id).join(',') === 'cod,upi',
+          `online=${bareConfig?.online_enabled}`,
+        )
+      } finally {
+        bare.kill('SIGTERM')
+      }
     }
   } finally {
     await cleanup()
