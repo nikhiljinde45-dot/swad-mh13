@@ -33,13 +33,25 @@ class InertSocket {
   close() {}
 }
 
-export const sb = configured
-  ? createClient(SUPABASE_URL, SERVICE_KEY, {
-      auth: { autoRefreshToken: false, persistSession: false, detectSessionInUrl: false },
-      global: { headers: { 'x-application-name': 'swad-mh13' } },
-      realtime: { transport: InertSocket },
-    })
-  : null
+const clientOptions = {
+  auth: { autoRefreshToken: false, persistSession: false, detectSessionInUrl: false },
+  global: { headers: { 'x-application-name': 'swad-mh13' } },
+  realtime: { transport: InertSocket },
+}
+
+/** Service-role client for database, storage and admin API calls. */
+export const sb = configured ? createClient(SUPABASE_URL, SERVICE_KEY, clientOptions) : null
+
+/**
+ * Auth-only client for password sign-in and token refresh.
+ *
+ * supabase-js keeps the signed-in session on the client instance and then sends
+ * that user's JWT as the Authorization header on every REST request. Sharing one
+ * client would silently downgrade our service-role writes to the signed-in user,
+ * so Row Level Security would reject them (this broke restaurant registration).
+ * Keeping session creation on its own client leaves `sb` permanently service-role.
+ */
+export const authSb = configured ? createClient(SUPABASE_URL, SERVICE_KEY, clientOptions) : null
 
 /* ----------------------------- cookies ---------------------------- */
 
@@ -147,7 +159,7 @@ export async function resolveSession(req, res) {
   }
 
   if (!user && tokens.rt) {
-    const { data, error } = await sb.auth.refreshSession({ refresh_token: tokens.rt })
+    const { data, error } = await authSb.auth.refreshSession({ refresh_token: tokens.rt })
     if (!error && data?.session) {
       user = data.session.user
       writeCookie(req, res, COOKIE_NAME, encodeSession({
@@ -169,7 +181,7 @@ export async function resolveSession(req, res) {
 
 /** Sign in with email/password and persist the resulting session. */
 export async function startSession(req, res, email, password) {
-  const { data, error } = await sb.auth.signInWithPassword({ email, password })
+  const { data, error } = await authSb.auth.signInWithPassword({ email, password })
   if (error || !data?.session) {
     const message = /invalid|credentials/i.test(error?.message || '')
       ? 'Incorrect email or password'
