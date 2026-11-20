@@ -11,6 +11,9 @@ import {
   resolveSession,
   startSession,
   loadProfile,
+  readCookie,
+  decodeSession,
+  revokeSession,
 } from './supabase.js'
 import { availableColumns, pick, ORDER_COLUMNS, RESTAURANT_COLUMNS, MENU_COLUMNS, PROFILE_COLUMNS } from './schema.js'
 
@@ -295,6 +298,18 @@ app.post('/api/auth/login', wrap(async (req, res) => {
 }))
 
 app.post('/api/auth/logout', wrap(async (req, res) => {
+  // Invalidate server-side, not just in the browser: the httpOnly cookie is a
+  // stateless JWT that would otherwise keep working until it expired.
+  const raw = readCookie(req, COOKIE_NAME)
+  const tokens = raw ? decodeSession(raw) : null
+  revokeSession(tokens?.at)
+  if (tokens?.at) {
+    try {
+      await sb.auth.admin.signOut(tokens.at)
+    } catch {
+      /* the local revocation above is authoritative for this server */
+    }
+  }
   clearCookie(req, res, COOKIE_NAME)
   res.json({ ok: true })
 }))
