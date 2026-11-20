@@ -314,6 +314,23 @@ app.post('/api/auth/forgot-password', wrap(async (req, res) => {
   res.json({ ok: true, message: 'If that email has an account, a reset link is on its way.' })
 }))
 
+// Completes the emailed reset link: the recovery token itself proves identity, so
+// the new password is written for the verified user only.
+app.post('/api/auth/reset-password', wrap(async (req, res) => {
+  if (!configured) fail(503, 'Supabase is not configured on the server')
+  const accessToken = clean(req.body?.access_token)
+  const password = clean(req.body?.password)
+  if (!accessToken) fail(400, 'This reset link is missing its token')
+  if (password.length < 8) fail(400, 'Password must be at least 8 characters')
+
+  const { data, error } = await sb.auth.getUser(accessToken)
+  if (error || !data?.user) fail(401, 'This reset link is invalid or has expired')
+
+  const { error: updateError } = await sb.auth.admin.updateUserById(data.user.id, { password })
+  if (updateError) fail(400, updateError.message)
+  res.json({ ok: true })
+}))
+
 app.post('/api/auth/password', requireAuth(), wrap(async (req, res) => {
   const password = clean(req.body?.password)
   if (password.length < 8) fail(400, 'Password must be at least 8 characters')

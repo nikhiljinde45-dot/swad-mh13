@@ -106,6 +106,11 @@ export const api = {
     }),
   changePassword: (password: string) =>
     request<{ ok: boolean }>('/api/auth/password', { method: 'POST', body: { password } }),
+  resetPassword: (accessToken: string, password: string) =>
+    request<{ ok: boolean }>('/api/auth/reset-password', {
+      method: 'POST',
+      body: { access_token: accessToken, password },
+    }),
 
   categories: () => request<{ categories: Category[] }>('/api/categories'),
   restaurants: (params: { search?: string; category?: string } = {}) => {

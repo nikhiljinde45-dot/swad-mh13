@@ -1,210 +1,281 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { api } from '../lib/api'
+import { AppShell } from '../components/AppShell'
+import { Alert, Button, Card, Field, Input, Spinner, TextArea, cx } from '../components/kit'
+import { ApiError, api } from '../lib/api'
+import { useAuth } from '../lib/auth'
+import { useCart } from '../lib/cart'
 import { inr } from '../lib/format'
-import { useCart, useProfile, useToast } from '../lib/app-state'
-import { Button, EmptyState, Field, Icon, SectionTitle, TextArea } from '../components/ui'
-
-const PHONE = /^[6-9]\d{9}$/
+import type { Address } from '../lib/types'
 
 export default function CheckoutPage() {
-  const { cart, count, subtotal, total, clear } = useCart()
-  const { profile, saveProfile } = useProfile()
-  const { notify } = useToast()
+  const { user, role } = useAuth()
+  const cart = useCart()
   const navigate = useNavigate()
 
-  const [name, setName] = useState(profile.name)
-  const [phone, setPhone] = useState(profile.phone)
-  const [address, setAddress] = useState(profile.address)
+  const [addresses, setAddresses] = useState<Address[]>([])
+  const [selected, setSelected] = useState<string>('')
+  const [adding, setAdding] = useState(false)
+  const [form, setForm] = useState({ full_address: '', city: '', pincode: '' })
   const [notes, setNotes] = useState('')
   const [payment, setPayment] = useState<'cod' | 'upi'>('cod')
-  const [errors, setErrors] = useState<Record<string, string>>({})
-  const [submitting, setSubmitting] = useState(false)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
 
-  if (!cart.lines.length) {
-    return (
-      <div className="px-4 py-8">
-        <EmptyState
-          emoji="🧾"
-          title="Nothing to check out"
-          body="Your cart is empty — pick a dish first."
-          action={
-            <Link to="/" className="rounded-xl bg-brand-500 px-4 py-2.5 text-sm font-semibold text-white">
-              Browse restaurants
-            </Link>
-          }
-        />
-      </div>
-    )
-  }
-
-  const submit = async () => {
-    const nextErrors: Record<string, string> = {}
-    if (name.trim().length < 2) nextErrors.name = 'Please enter your full name'
-    if (!PHONE.test(phone.trim())) nextErrors.phone = 'Enter a valid 10-digit mobile number'
-    if (address.trim().length < 10) nextErrors.address = 'Add a complete delivery address'
-    setErrors(nextErrors)
-    if (Object.keys(nextErrors).length) return
-
-    setSubmitting(true)
-    try {
-      const { order } = await api.createOrder({
-        customer_name: name.trim(),
-        phone: phone.trim(),
-        address: address.trim(),
-        restaurant_id: cart.restaurantId as string,
-        items: cart.lines.map((line) => ({ menu_item_id: line.item.id, qty: line.qty })),
-        payment_method: payment,
-        notes: notes.trim(),
+  useEffect(() => {
+    if (!user || role !== 'customer') {
+      setLoading(false)
+      return
+    }
+    api
+      .addresses()
+      .then((result) => {
+        setAddresses(result.addresses)
+        if (result.addresses.length) setSelected(result.addresses[0].id)
+        else setAdding(true)
       })
-      saveProfile({ name: name.trim(), phone: phone.trim(), address: address.trim(), id: order.customer_id })
-      clear()
-      notify('Order placed successfully')
-      navigate(`/track/${order.id}`, { replace: true })
-    } catch (err) {
-      notify((err as Error).message, 'error')
+      .catch((cause) => setError(cause instanceof ApiError ? cause.message : 'Could not load addresses.'))
+      .finally(() => setLoading(false))
+  }, [user, role])
+
+  const saveAddress = async () => {
+    setError(null)
+    if (form.full_address.trim().length < 6) {
+      setError('Enter your full delivery address.')
+      return
+    }
+    if (form.city.trim().length < 2) {
+      setError('Enter your city.')
+      return
+    }
+    if (!/^[1-9][0-9]{5}$/.test(form.pincode.trim())) {
+      setError('PIN code must be 6 digits.')
+      return
+    }
+
+    setBusy(true)
+    try {
+      const result = await api.createAddress({
+        full_address: form.full_address.trim(),
+        city: form.city.trim(),
+        pincode: form.pincode.trim(),
+      })
+      setAddresses((current) => [result.address, ...current])
+      setSelected(result.address.id)
+      setAdding(false)
+      setForm({ full_address: '', city: '', pincode: '' })
+    } catch (cause) {
+      setError(cause instanceof ApiError ? cause.message : 'Could not save the address.')
     } finally {
-      setSubmitting(false)
+      setBusy(false)
     }
   }
 
+  const placeOrder = async () => {
+    setError(null)
+    if (!cart.restaurantId || cart.lines.length === 0) {
+      setError('Your cart is empty.')
+      return
+    }
+    if (!selected) {
+      setError('Add a delivery address first.')
+      return
+    }
+
+    setBusy(true)
+    try {
+      const result = await api.placeOrder({
+        restaurant_id: cart.restaurantId,
+        items: cart.lines.map((line) => ({ menu_item_id: line.menu_item_id, quantity: line.quantity })),
+        address_id: selected,
+        payment_method: payment,
+        notes: notes.trim() || undefined,
+      })
+      cart.clear()
+      navigate(`/orders?placed=${result.order.id}`, { replace: true })
+    } catch (cause) {
+      setError(cause instanceof ApiError ? cause.message : 'Could not place the order.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  if (!user) {
+    return (
+      <AppShell>
+        <Alert tone="warning">
+          Please sign in to check out.{' '}
+          <Link to="/login" className="font-bold underline">
+            Sign in
+          </Link>
+        </Alert>
+      </AppShell>
+    )
+  }
+
+  if (role && role !== 'customer') {
+    return (
+      <AppShell>
+        <Alert tone="warning">Only customer accounts can place orders.</Alert>
+      </AppShell>
+    )
+  }
+
   return (
-    <div className="pb-32">
-      <div className="sticky top-0 z-20 flex items-center gap-2 border-b border-ink-300/60 bg-cream/95 px-4 py-3 backdrop-blur pt-safe">
-        <Link to="/cart" aria-label="Back to cart" className="grid h-9 w-9 place-items-center rounded-xl bg-white ring-1 ring-ink-300">
-          <Icon.Back />
-        </Link>
-        <div>
-          <h1 className="text-base font-extrabold leading-tight text-ink-900">Checkout</h1>
-          <p className="text-[11px] text-ink-500">{cart.restaurantName}</p>
-        </div>
-      </div>
+    <AppShell>
+      <div className="space-y-4">
+        <h1 className="text-xl font-extrabold text-slate-900">Checkout</h1>
 
-      <div className="space-y-4 px-4 pt-4">
-        <section>
-          <SectionTitle>Delivery details</SectionTitle>
-          <div className="space-y-3 rounded-2xl bg-white p-4 shadow-card ring-1 ring-black/5">
-            <div>
-              <Field
-                label="Full name"
-                value={name}
-                onChange={(event) => setName(event.target.value)}
-                placeholder="Rohan Patil"
-                autoComplete="name"
-                inputMode="text"
-              />
-              {errors.name && <p className="mt-1 text-[11px] font-semibold text-rose-600">{errors.name}</p>}
-            </div>
-            <div>
-              <Field
-                label="Mobile number"
-                value={phone}
-                onChange={(event) => setPhone(event.target.value.replace(/\D/g, '').slice(0, 10))}
-                placeholder="98765 43210"
-                autoComplete="tel"
-                inputMode="numeric"
-                hint="Used for delivery updates only."
-              />
-              {errors.phone && <p className="mt-1 text-[11px] font-semibold text-rose-600">{errors.phone}</p>}
-            </div>
-            <div>
-              <TextArea
-                label="Delivery address"
-                value={address}
-                onChange={(event) => setAddress(event.target.value)}
-                placeholder="Flat / house, street, landmark, area, pincode"
-                rows={3}
-                autoComplete="street-address"
-              />
-              {errors.address && (
-                <p className="mt-1 text-[11px] font-semibold text-rose-600">{errors.address}</p>
-              )}
-            </div>
-            <Field
-              label="Delivery notes (optional)"
-              value={notes}
-              onChange={(event) => setNotes(event.target.value)}
-              placeholder="Extra tarri, less spicy, ring the bell…"
-            />
-          </div>
-        </section>
+        {error && <Alert tone="error">{error}</Alert>}
 
-        <section>
-          <SectionTitle>Payment method</SectionTitle>
-          <div className="grid grid-cols-2 gap-2">
-            {(
-              [
-                { id: 'cod', label: 'Cash on delivery', emoji: '💵', hint: 'Pay the rider' },
-                { id: 'upi', label: 'UPI', emoji: '📲', hint: 'Pay via app' },
-              ] as const
-            ).map((option) => {
-              const active = payment === option.id
-              return (
-                <button
-                  key={option.id}
-                  type="button"
-                  onClick={() => setPayment(option.id)}
-                  aria-pressed={active}
-                  className={`rounded-2xl p-3 text-left transition ${
-                    active
-                      ? 'bg-brand-50 ring-2 ring-brand-400'
-                      : 'bg-white ring-1 ring-ink-300'
-                  }`}
+        {loading ? (
+          <Spinner label="Loading your addresses…" />
+        ) : (
+          <>
+            <Card className="space-y-3">
+              <p className="text-xs font-bold uppercase tracking-wide text-slate-500">
+                Delivery address
+              </p>
+
+              {addresses.map((address) => (
+                <label
+                  key={address.id}
+                  className={cx(
+                    'flex cursor-pointer gap-3 rounded-xl p-3 ring-1 transition-colors',
+                    selected === address.id
+                      ? 'bg-orange-50 ring-orange-300'
+                      : 'bg-white ring-slate-200',
+                  )}
                 >
-                  <span className="text-lg" aria-hidden>
-                    {option.emoji}
+                  <input
+                    type="radio"
+                    name="address"
+                    checked={selected === address.id}
+                    onChange={() => setSelected(address.id)}
+                    className="mt-1 accent-orange-600"
+                  />
+                  <span className="text-sm">
+                    <span className="block font-semibold text-slate-900">{address.full_address}</span>
+                    <span className="text-xs text-slate-500">
+                      {address.city} — {address.pincode}
+                    </span>
                   </span>
-                  <p className="mt-1 text-xs font-bold text-ink-900">{option.label}</p>
-                  <p className="text-[10px] text-ink-500">{option.hint}</p>
-                </button>
-              )
-            })}
-          </div>
-        </section>
-
-        <section>
-          <SectionTitle>Order summary</SectionTitle>
-          <div className="rounded-2xl bg-white p-4 text-sm shadow-card ring-1 ring-black/5">
-            <ul className="space-y-1.5">
-              {cart.lines.map(({ item, qty }) => (
-                <li key={item.id} className="flex justify-between gap-2 text-ink-700">
-                  <span className="min-w-0 truncate">
-                    <span className="font-semibold text-ink-900">{qty}×</span> {item.name}
-                  </span>
-                  <span className="shrink-0 font-semibold">{inr(item.price * qty)}</span>
-                </li>
+                </label>
               ))}
-            </ul>
-            <div className="mt-3 space-y-1.5 border-t border-dashed border-ink-300 pt-3">
-              <div className="flex justify-between text-ink-700">
+
+              {adding ? (
+                <div className="space-y-2 rounded-xl bg-slate-50 p-3">
+                  <Field label="Full address" htmlFor="addr-full">
+                    <TextArea
+                      id="addr-full"
+                      value={form.full_address}
+                      onChange={(event) => setForm({ ...form, full_address: event.target.value })}
+                      placeholder="Flat / house no., building, street, area"
+                    />
+                  </Field>
+                  <div className="grid grid-cols-2 gap-2">
+                    <Field label="City" htmlFor="addr-city">
+                      <Input
+                        id="addr-city"
+                        value={form.city}
+                        onChange={(event) => setForm({ ...form, city: event.target.value })}
+                      />
+                    </Field>
+                    <Field label="PIN code" htmlFor="addr-pin">
+                      <Input
+                        id="addr-pin"
+                        inputMode="numeric"
+                        maxLength={6}
+                        value={form.pincode}
+                        onChange={(event) => setForm({ ...form, pincode: event.target.value })}
+                      />
+                    </Field>
+                  </div>
+                  <div className="flex gap-2">
+                    <Button size="sm" loading={busy} onClick={() => void saveAddress()}>
+                      Save address
+                    </Button>
+                    {addresses.length > 0 && (
+                      <Button size="sm" variant="ghost" onClick={() => setAdding(false)}>
+                        Cancel
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setAdding(true)}
+                  className="text-xs font-bold text-orange-700 hover:underline"
+                >
+                  + Add another address
+                </button>
+              )}
+            </Card>
+
+            <Card className="space-y-3">
+              <p className="text-xs font-bold uppercase tracking-wide text-slate-500">Payment</p>
+              <div className="grid grid-cols-2 gap-2">
+                {(['cod', 'upi'] as const).map((method) => (
+                  <button
+                    key={method}
+                    type="button"
+                    onClick={() => setPayment(method)}
+                    className={cx(
+                      'rounded-xl px-3 py-2.5 text-sm font-bold ring-1',
+                      payment === method
+                        ? 'bg-slate-900 text-white ring-slate-900'
+                        : 'bg-white text-slate-700 ring-slate-200',
+                    )}
+                  >
+                    {method === 'cod' ? 'Cash on delivery' : 'UPI on delivery'}
+                  </button>
+                ))}
+              </div>
+              <Field label="Notes for the kitchen" hint="Optional">
+                <Input
+                  value={notes}
+                  onChange={(event) => setNotes(event.target.value)}
+                  placeholder="Less spicy, extra chutney…"
+                  maxLength={200}
+                />
+              </Field>
+            </Card>
+
+            <Card className="space-y-1.5">
+              <p className="text-xs font-bold uppercase tracking-wide text-slate-500">
+                Order summary
+              </p>
+              {cart.lines.map((line) => (
+                <div key={line.menu_item_id} className="flex justify-between text-sm text-slate-700">
+                  <span className="truncate pr-2">
+                    {line.quantity} × {line.name}
+                  </span>
+                  <span className="shrink-0 font-semibold">{inr(line.price * line.quantity)}</span>
+                </div>
+              ))}
+              <div className="flex justify-between border-t border-dashed border-slate-200 pt-1.5 text-base font-extrabold text-slate-900">
                 <span>Item total</span>
-                <span>{inr(subtotal)}</span>
+                <span>{inr(cart.subtotal)}</span>
               </div>
-              <div className="flex justify-between text-ink-700">
-                <span>Delivery fee</span>
-                <span>{cart.deliveryFee === 0 ? 'FREE' : inr(cart.deliveryFee)}</span>
-              </div>
-              <div className="flex justify-between text-base font-extrabold text-ink-900">
-                <span>To pay</span>
-                <span>{inr(total)}</span>
-              </div>
-            </div>
-          </div>
-        </section>
+              <p className="text-[11px] text-slate-400">
+                Delivery fee is added from the restaurant settings and the final total is verified on
+                the server.
+              </p>
+            </Card>
 
-        <p className="text-center text-[10px] leading-relaxed text-ink-500">
-          By placing this order you agree to Swad MH13’s fair-use policy. Your details are used only
-          to deliver this order.
-        </p>
+            <Button
+              full
+              loading={busy}
+              disabled={cart.lines.length === 0}
+              onClick={() => void placeOrder()}
+            >
+              Place order
+            </Button>
+          </>
+        )}
       </div>
-
-      <div className="fixed inset-x-0 bottom-16 z-30 px-3">
-        <div className="mx-auto w-full max-w-lg">
-          <Button full size="lg" loading={submitting} onClick={submit} className="shadow-float">
-            {submitting ? 'Placing order…' : `Place order • ${inr(total)} (${count})`}
-          </Button>
-        </div>
-      </div>
-    </div>
+    </AppShell>
   )
 }
