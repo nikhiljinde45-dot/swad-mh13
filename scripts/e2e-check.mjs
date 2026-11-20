@@ -99,7 +99,14 @@ async function main() {
   }
 
   const server = spawn(process.execPath, ['server/index.js'], {
-    env: { ...process.env, PORT: String(PORT) },
+    env: {
+      ...process.env,
+      PORT: String(PORT),
+      // Deterministic payment settings so the online path is always exercised.
+      UPI_VPA: 'swadtest@okaxis',
+      UPI_PAYEE_NAME: 'Swad MH13 Test',
+      PAYMENT_QR_IMAGE_URL: '',
+    },
     stdio: ['ignore', 'pipe', 'pipe'],
   })
   const serverLog = []
