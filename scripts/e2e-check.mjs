@@ -72,12 +72,16 @@ async function waitForServer() {
   return false
 }
 
-const created = { users: [], restaurants: [], menuItems: [] }
+const created = { users: [], restaurants: [], menuItems: [], orders: [] }
 
 async function cleanup() {
   if (!configured) return
   try {
     for (const id of created.menuItems) await sb.from('menu_items').delete().eq('id', id)
+    for (const id of created.orders) {
+      await sb.from('order_items').delete().eq('order_id', id)
+      await sb.from('orders').delete().eq('id', id)
+    }
     for (const id of created.restaurants) await sb.from('restaurants').delete().eq('id', id)
     for (const id of created.users) {
       await sb.from('profiles').delete().eq('id', id)
