@@ -22,7 +22,9 @@ app.get('/api/config', (_req, res) => {
   res.json({
     app: 'Swad MH13',
     mode: db.status.mode,
+    supabase_url: db.status.supabaseUrl,
     supabase_configured: db.status.supabaseConfigured,
+    supabase_key_missing: db.status.missingKey,
     warning: db.status.warning,
     statuses: db.ORDER_STATUSES,
     flow: db.ORDER_FLOW,

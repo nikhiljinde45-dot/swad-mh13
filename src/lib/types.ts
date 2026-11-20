@@ -107,7 +107,9 @@ export interface Category {
 export interface AppConfig {
   app: string
   mode: 'supabase' | 'demo'
+  supabase_url?: string | null
   supabase_configured: boolean
+  supabase_key_missing?: boolean
   warning: string | null
   statuses: OrderStatus[]
   flow: OrderStatus[]

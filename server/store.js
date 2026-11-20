@@ -21,15 +21,44 @@ import {
   categories,
 } from './seed.js'
 
-const SUPABASE_URL = (process.env.SUPABASE_URL || '').trim()
+/**
+ * Resolve the Supabase project URL. Accepts any of these forms:
+ *   SUPABASE_URL=https://vppfluhgfkbamwngadcd.supabase.co   (full URL)
+ *   SUPABASE_URL=vppfluhgfkbamwngadcd                      (bare project ref)
+ *   SUPABASE_PROJECT_REF=vppfluhgfkbamwngadcd              (bare ref, fallback)
+ * A bare ref is expanded to https://<ref>.supabase.co, which is the same host the
+ * dashboard shows at Settings -> API -> Project URL.
+ */
+function resolveSupabaseUrl() {
+  const raw = (process.env.SUPABASE_URL || process.env.SUPABASE_PROJECT_REF || '')
+    .trim()
+    .replace(/\/+$/, '')
+  if (!raw) return ''
+  const withScheme = /^[a-z][a-z0-9+.-]*:\/\//i.test(raw) ? raw : `https://${raw}`
+  try {
+    const url = new URL(withScheme)
+    if (!url.hostname.includes('.')) return `https://${url.hostname}.supabase.co`
+    return url.origin
+  } catch {
+    console.warn(`[swad-mh13] could not parse Supabase URL from "${raw}"`)
+    return ''
+  }
+}
+
+const SUPABASE_URL = resolveSupabaseUrl()
 const SUPABASE_KEY = (
   process.env.SUPABASE_SERVICE_ROLE_KEY ||
   process.env.SUPABASE_ANON_KEY ||
   ''
 ).trim()
+const SUPABASE_HOST = SUPABASE_URL ? new URL(SUPABASE_URL).hostname : ''
 
 export const status = {
+  // Project URL is public information; the API key never leaves the server.
+  supabaseUrl: SUPABASE_URL || null,
+  supabaseHost: SUPABASE_HOST || null,
   supabaseConfigured: Boolean(SUPABASE_URL && SUPABASE_KEY),
+  missingKey: Boolean(SUPABASE_URL && !SUPABASE_KEY),
   hasServiceRole: Boolean(process.env.SUPABASE_SERVICE_ROLE_KEY),
   mode: 'demo',
   warning: null,
@@ -79,11 +108,18 @@ function orderCode() {
 /* ------------------------------------------------------------------ */
 
 export async function init() {
-  if (!status.supabaseConfigured) {
+  if (!SUPABASE_URL) {
     status.mode = 'demo'
     status.warning =
-      'Supabase is not configured. Running on built-in demo data. Add SUPABASE_URL and SUPABASE_ANON_KEY to connect your database.'
-    console.log('[swad-mh13] demo mode — no Supabase credentials found')
+      'No Supabase project URL found. Running on built-in demo data. Set SUPABASE_URL (or SUPABASE_PROJECT_REF) and SUPABASE_ANON_KEY in Settings → Environment variables.'
+    console.log('[swad-mh13] demo mode — no Supabase project URL configured')
+    return status
+  }
+
+  if (!SUPABASE_KEY) {
+    status.mode = 'demo'
+    status.warning = `Supabase project ${SUPABASE_HOST} is linked, but SUPABASE_ANON_KEY is missing. Add it in Settings → Environment variables to switch from demo data to your database.`
+    console.log(`[swad-mh13] demo mode — project ${SUPABASE_HOST} linked, waiting for SUPABASE_ANON_KEY`)
     return status
   }
 
