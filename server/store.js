@@ -29,7 +29,7 @@ import {
  * A bare ref is expanded to https://<ref>.supabase.co, which is the same host the
  * dashboard shows at Settings -> API -> Project URL.
  */
-function resolveSupabaseUrl() {
+export function resolveSupabaseUrl() {
   const raw = (process.env.SUPABASE_URL || process.env.SUPABASE_PROJECT_REF || '')
     .trim()
     .replace(/\/+$/, '')
